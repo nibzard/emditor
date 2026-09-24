@@ -1,5 +1,5 @@
 // ABOUTME: Desk cards: an A4 thumbnail of one document, or a stack of documents.
-// ABOUTME: Cards take native drag and drop: drop on the side to move, drop in the middle to stack.
+// ABOUTME: Cards move by drag and drop; grouping uses an explicit selection action.
 
 import { AnimatePresence, motion } from 'motion/react'
 import { type DragEvent, memo, type MouseEvent, useMemo } from 'react'
@@ -8,7 +8,7 @@ import { renderPreview } from '../lib/preview'
 import { dirOf, timeAgo, titleFromPath } from '../lib/text'
 import { CloseIcon } from './icons'
 
-export type DropZone = 'before' | 'after' | 'stack'
+export type DropZone = 'before' | 'after'
 
 type Props = {
   item: DeskItem
@@ -19,6 +19,7 @@ type Props = {
   drop: DropZone | null
   openPaths: Set<string>
   onClick: (e: MouseEvent) => void
+  onFocus: () => void
   onUnstack: () => void
   onDragStart: () => void
   onDragOver: (zone: DropZone) => void
@@ -30,7 +31,7 @@ type Props = {
 function zoneOf(e: DragEvent<HTMLElement>): DropZone {
   const box = e.currentTarget.getBoundingClientRect()
   const x = (e.clientX - box.left) / box.width
-  return x < 0.25 ? 'before' : x > 0.75 ? 'after' : 'stack'
+  return x < 0.5 ? 'before' : 'after'
 }
 
 const Thumb = memo(function Thumb({ markdown, path }: { markdown: string; path: string }) {
@@ -70,8 +71,12 @@ export function DeskCard(props: Props) {
       {cursor && <motion.div layoutId="desk-cursor" className="card-cursor" transition={{ type: 'spring', stiffness: 600, damping: 44 }} />}
       <div
         className="card-body"
+        role="button"
+        tabIndex={0}
+        aria-label={item.kind === 'stack' ? `Open stack: ${item.files.length} documents, starting with ${titleFromPath(top.path)}` : `Open ${titleFromPath(top.path)}`}
         draggable
         onClick={props.onClick}
+        onFocus={props.onFocus}
         onDragStart={(e) => {
           e.dataTransfer.effectAllowed = 'move'
           e.dataTransfer.setData('text/plain', item.key)
@@ -96,17 +101,6 @@ export function DeskCard(props: Props) {
               <span className="sheet sheet-1" />
               <span className="sheet sheet-2" />
               <span className="stack-count">{item.files.length}</span>
-              <button
-                className="unstack-btn"
-                title="Unstack (U)"
-                aria-label="Unstack"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  props.onUnstack()
-                }}
-              >
-                <CloseIcon />
-              </button>
             </>
           )}
           <Thumb markdown={top.preview} path={top.path} />
@@ -134,6 +128,8 @@ export function DeskCard(props: Props) {
           <span className="card-sub">{sub}</span>
         </div>
       </div>
+      {item.kind === 'stack' && <button className="unstack-btn" title="Unstack (U)" aria-label={`Unstack ${titleFromPath(top.path)} and ${item.files.length - 1} more documents`}
+        onClick={props.onUnstack}><CloseIcon /></button>}
     </motion.div>
   )
 }

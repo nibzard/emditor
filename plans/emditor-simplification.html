@@ -1,0 +1,233 @@
+<style>
+  #emditor-concept {
+    --em-bg: light-dark(#f4f2ed, #24221f);
+    --em-paper: light-dark(#fffefb, #302d28);
+    --em-ink: light-dark(#27251f, #f2eee6);
+    --em-secondary: light-dark(#676159, #c7c0b5);
+    --em-line: light-dark(#ded9d0, #4c463e);
+    --em-accent: light-dark(#a83b28, #ee9b84);
+    --em-selection: light-dark(#ebe5dc, #433c33);
+    --em-button: light-dark(#29251f, #eae3d8);
+    --em-button-text: light-dark(#fffefb, #29251f);
+    color: var(--em-ink);
+    background: var(--em-bg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    width: 100%;
+    container-type: inline-size;
+  }
+  #emditor-concept * { box-sizing: border-box; }
+  #emditor-concept [hidden] { display: none !important; }
+  #emditor-concept button, #emditor-concept input, #emditor-concept textarea, #emditor-concept select { font: inherit; }
+  #emditor-concept button { cursor: pointer; }
+  #emditor-concept .em-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--em-line); }
+  #emditor-concept .em-brand { display: flex; align-items: center; gap: 9px; font-weight: 500; }
+  #emditor-concept .em-seal { width: 8px; height: 8px; border-radius: 50%; background: var(--em-accent); }
+  #emditor-concept .em-folder { color: var(--em-secondary); font-weight: 400; }
+  #emditor-concept .em-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  #emditor-concept .em-control { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 6px 10px; color: var(--em-ink); background: var(--em-paper); border: 1px solid var(--em-line); border-radius: 7px; }
+  #emditor-concept .em-control:hover { background: var(--em-selection); }
+  #emditor-concept .em-control[aria-pressed="true"] { background: var(--em-selection); }
+  #emditor-concept .em-primary { background: var(--em-button); border-color: var(--em-button); color: var(--em-button-text); }
+  #emditor-concept .em-primary:hover { opacity: .9; background: var(--em-button); }
+  #emditor-concept .em-plain { background: transparent; border-color: transparent; }
+  #emditor-concept .em-layout { display: grid; grid-template-columns: 218px minmax(0, 1fr); }
+  #emditor-concept[data-documents="false"] .em-layout { grid-template-columns: minmax(0, 1fr); }
+  #emditor-concept .em-sidebar { padding: 20px 12px; border-right: 1px solid var(--em-line); }
+  #emditor-concept .em-sidebar-heading { margin: 0 8px 14px; font-size: 14px; font-weight: 500; }
+  #emditor-concept .em-search-label { display: block; margin: 0 8px 5px; font-size: 12px; color: var(--em-secondary); }
+  #emditor-concept .em-search { width: 100%; min-height: 36px; padding: 7px 10px; margin-bottom: 18px; border: 1px solid var(--em-line); border-radius: 7px; color: var(--em-ink); background: var(--em-paper); }
+  #emditor-concept .em-search::placeholder { color: var(--em-secondary); }
+  #emditor-concept .em-subheading { color: var(--em-secondary); font-size: 12px; margin: 0 8px 6px; }
+  #emditor-concept .em-doc-list { display: grid; gap: 5px; }
+  #emditor-concept .em-doc { width: 100%; display: block; text-align: left; padding: 11px 10px; color: var(--em-ink); border: 0; border-radius: 7px; background: transparent; }
+  #emditor-concept .em-doc:hover, #emditor-concept .em-doc[aria-current="page"] { background: var(--em-selection); }
+  #emditor-concept .em-doc-name { display: block; font-weight: 500; overflow-wrap: anywhere; }
+  #emditor-concept .em-doc-detail { display: block; margin-top: 3px; color: var(--em-secondary); font-size: 12px; }
+  #emditor-concept .em-thumb { display: none; }
+  #emditor-concept[data-navigation="paper"] .em-thumb { display: block; background: var(--em-paper); border: 1px solid var(--em-line); padding: 12px; margin: 0 12px 10px; aspect-ratio: 210/240; font: 14px/1.4 Georgia, serif; }
+  #emditor-concept .em-thumb-rule { display: block; height: 1px; margin-top: 10px; background: var(--em-line); }
+  #emditor-concept .em-work { min-width: 0; }
+  #emditor-concept .em-document-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 22px 6px; }
+  #emditor-concept .em-save { display: inline-flex; align-items: center; gap: 6px; color: var(--em-secondary); font-size: 12px; }
+  #emditor-concept .em-sheets { display: grid; gap: 20px; padding: 18px 24px 32px; align-items: start; }
+  #emditor-concept[data-beside="true"] .em-sheets { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding-left: 18px; padding-right: 18px; }
+  #emditor-concept .em-paper { background: var(--em-paper); padding: 38px clamp(22px, 4cqw, 48px); min-width: 0; box-shadow: 0 1px 3px light-dark(#29231b14, #00000026); min-height: 360px; }
+  #emditor-concept .em-copy { font: 17px/1.7 "Iowan Old Style", "Palatino Linotype", Georgia, serif; overflow-wrap: anywhere; }
+  #emditor-concept .em-copy h1 { font: 500 30px/1.2 "Iowan Old Style", "Palatino Linotype", Georgia, serif; margin: 0 0 22px; letter-spacing: -.025em; }
+  #emditor-concept .em-copy h2 { font: 500 20px/1.3 "Iowan Old Style", "Palatino Linotype", Georgia, serif; margin: 22px 0 10px; }
+  #emditor-concept .em-copy p { margin: 0 0 16px; }
+  #emditor-concept .em-copy ul { padding-left: 22px; margin: 8px 0 16px; }
+  #emditor-concept .em-source { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.7 ui-monospace, Menlo, monospace; }
+  #emditor-concept .em-reference-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; color: var(--em-secondary); font-size: 12px; }
+  #emditor-concept .em-reference .em-copy { font-size: 16px; }
+  #emditor-concept .em-reference .em-copy h1 { font-size: 24px; }
+  #emditor-concept .em-empty { margin: 12px 8px; color: var(--em-secondary); }
+  #emditor-concept .em-inline-panel { margin: 10px 22px 0; padding: 16px; background: var(--em-paper); border: 1px solid var(--em-line); border-radius: 8px; }
+  #emditor-concept .em-inline-panel h2 { margin: 0 0 12px; font-size: 15px; font-weight: 500; }
+  #emditor-concept .em-pick-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  #emditor-concept .em-new-label { display: block; margin-bottom: 7px; font-weight: 500; }
+  #emditor-concept .em-new-input { width: 100%; margin: 0 0 8px; padding: 9px 10px; background: var(--em-paper); color: var(--em-ink); border: 1px solid var(--em-line); border-radius: 6px; }
+  #emditor-concept .em-location { font-size: 12px; color: var(--em-secondary); margin: 0 0 12px; overflow-wrap: anywhere; }
+  #emditor-concept .em-status { color: var(--em-secondary); font-size: 12px; padding: 0 24px 18px; margin: 0; }
+  @container (max-width: 760px) {
+    #emditor-concept .em-layout { grid-template-columns: 178px minmax(0, 1fr); }
+    #emditor-concept[data-beside="true"] .em-sheets { grid-template-columns: minmax(0, 1fr); }
+    #emditor-concept .em-paper { padding: 28px 24px; }
+  }
+  @container (max-width: 560px) {
+    #emditor-concept .em-header { padding: 14px; }
+    #emditor-concept .em-layout { grid-template-columns: minmax(0, 1fr); }
+    #emditor-concept .em-sidebar { border-right: 0; border-bottom: 1px solid var(--em-line); padding: 16px; }
+    #emditor-concept .em-doc-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #emditor-concept .em-sheets { padding: 14px; }
+    #emditor-concept .em-document-bar { padding: 14px; }
+    #emditor-concept .em-copy h1 { font-size: 27px; }
+  }
+  @media (pointer: coarse) {
+    #emditor-concept .em-control, #emditor-concept .em-doc { min-height: 44px; }
+    #emditor-concept input { font-size: 16px; }
+  }
+</style>
+<div id="emditor-concept" data-documents="true" data-beside="false" data-navigation="list" aria-label="Proposed emditor document workspace">
+  <header class="em-header">
+    <div class="em-brand"><span class="em-seal" aria-hidden="true"></span>emditor <span class="em-folder">/ Field notes</span></div>
+    <div class="em-actions">
+      <button class="em-control em-plain" type="button" id="em-documents-toggle" aria-expanded="true" aria-controls="em-documents"><i data-lucide="panel-left" aria-hidden="true"></i>Documents</button>
+      <button class="em-control em-primary" type="button" id="em-new"><i data-lucide="plus" aria-hidden="true"></i>New document</button>
+    </div>
+  </header>
+  <div class="em-layout">
+    <aside class="em-sidebar" id="em-documents" aria-label="Documents">
+      <h2 class="em-sidebar-heading">Your documents</h2>
+      <label class="em-search-label" for="em-search">Find a document</label>
+      <input id="em-search" class="em-search" type="search" placeholder="Search by name…" autocomplete="off">
+      <p class="em-subheading">Recently edited</p>
+      <nav class="em-doc-list" id="em-doc-list" aria-label="Recent documents"></nav>
+      <p class="em-empty" id="em-no-results" hidden>No matching documents.</p>
+    </aside>
+    <section class="em-work" aria-label="Writing workspace">
+      <form class="em-inline-panel" id="em-create-panel" hidden>
+        <label class="em-new-label" for="em-new-name">Document name</label>
+        <input class="em-new-input" id="em-new-name" required autocomplete="off" placeholder="Untitled document">
+        <p class="em-location" id="em-new-location">Field notes / Untitled document.md</p>
+        <div class="em-actions"><button class="em-control em-primary" type="submit">Create document</button><button class="em-control" type="button" id="em-cancel-new">Cancel</button></div>
+      </form>
+      <div class="em-document-bar">
+        <span class="em-save" id="em-save"><i data-lucide="check" aria-hidden="true"></i><span id="em-save-label">Saved locally</span></span>
+        <div class="em-actions">
+          <button class="em-control em-plain" id="em-source-toggle" type="button" aria-pressed="false">Markdown source</button>
+          <button class="em-control" id="em-beside-toggle" type="button" aria-expanded="false" aria-controls="em-beside-picker"><i data-lucide="columns-2" aria-hidden="true"></i>Open beside</button>
+        </div>
+      </div>
+      <section class="em-inline-panel" id="em-beside-picker" aria-label="Choose a document to open beside" hidden>
+        <h2>Open beside this document</h2>
+        <div class="em-pick-list" id="em-pick-list"></div>
+      </section>
+      <div class="em-sheets">
+        <article class="em-paper" aria-label="Current document">
+          <div class="em-copy" id="em-rich-copy"></div>
+          <pre class="em-source" id="em-source-copy" hidden></pre>
+        </article>
+        <article class="em-paper em-reference" id="em-reference" aria-label="Document opened beside" hidden>
+          <div class="em-reference-head"><span>Beside your draft</span><button class="em-control em-plain" type="button" id="em-close-reference" aria-label="Close the document opened beside"><i data-lucide="x" aria-hidden="true"></i>Close</button></div>
+          <div class="em-copy" id="em-reference-copy"></div>
+        </article>
+      </div>
+      <p class="em-status" id="em-demo-status" role="status">Interaction concept · sample documents</p>
+    </section>
+  </div>
+</div>
+<script>
+(() => {
+  const root = document.getElementById('emditor-concept');
+  const el = id => root.querySelector('#' + id);
+  const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const documents = [
+    { id: 'draft', name: 'A simpler writing day', detail: 'Today · Drafts', body: '<h1>A simpler writing day</h1><p>A good writing space lets you pick up a thought and stay with it.</p><p>Keep the notes you need close by. Give the draft enough room to breathe. Leave the next step easy to find.</p><h2>For the next draft</h2><ul><li>Start with the main idea.</li><li>Keep one useful example.</li><li>Read it once, out loud.</li></ul>', markdown: '# A simpler writing day\n\nA good writing space lets you pick up a thought and stay with it.\n\nKeep the notes you need close by. Give the draft enough room to breathe. Leave the next step easy to find.\n\n## For the next draft\n\n- Start with the main idea.\n- Keep one useful example.\n- Read it once, out loud.\n' },
+    { id: 'research', name: 'Research notes', detail: 'Yesterday · Notes', body: '<h1>Research notes</h1><p>The first few minutes matter. Can someone open a document, make a change, and trust that it has been saved?</p><h2>Questions to bring back</h2><ul><li>Where did they hesitate?</li><li>Which label needed explaining?</li><li>Was the next action visible?</li></ul>', markdown: '# Research notes\n\nThe first few minutes matter. Can someone open a document, make a change, and trust that it has been saved?\n\n## Questions to bring back\n\n- Where did they hesitate?\n- Which label needed explaining?\n- Was the next action visible?\n' },
+    { id: 'ideas', name: 'Small ideas', detail: 'Monday · Notes', body: '<h1>Small ideas</h1><p>A place for thoughts that do not need a whole document yet.</p><h2>Next week</h2><p>Take a walk before opening the laptop. Return with one idea worth writing down.</p>', markdown: '# Small ideas\n\nA place for thoughts that do not need a whole document yet.\n\n## Next week\n\nTake a walk before opening the laptop. Return with one idea worth writing down.\n' }
+  ];
+  const state = { active: 'draft', beside: null, documents: true, source: false, navigation: 'list' };
+  let newCounter = 0;
+  function renderList() {
+    const query = el('em-search').value.trim().toLocaleLowerCase();
+    const matches = documents.filter(doc => doc.name.toLocaleLowerCase().includes(query));
+    el('em-doc-list').innerHTML = matches.map(doc => '<button class="em-doc" type="button" data-doc="' + doc.id + '"' + (doc.id === state.active ? ' aria-current="page"' : '') + '><span class="em-thumb" aria-hidden="true">' + escape(doc.name) + '<span class="em-thumb-rule"></span><span class="em-thumb-rule"></span><span class="em-thumb-rule"></span></span><span class="em-doc-name">' + escape(doc.name) + '</span><span class="em-doc-detail">' + escape(doc.detail) + '</span></button>').join('');
+    el('em-no-results').hidden = matches.length > 0;
+  }
+  function render() {
+    root.dataset.documents = String(state.documents);
+    root.dataset.beside = String(Boolean(state.beside));
+    root.dataset.navigation = state.navigation;
+    el('em-documents').hidden = !state.documents;
+    el('em-documents-toggle').setAttribute('aria-expanded', String(state.documents));
+    const current = documents.find(doc => doc.id === state.active);
+    el('em-rich-copy').innerHTML = current.body;
+    el('em-source-copy').textContent = current.markdown;
+    el('em-rich-copy').hidden = state.source;
+    el('em-source-copy').hidden = !state.source;
+    el('em-source-toggle').setAttribute('aria-pressed', String(state.source));
+    el('em-source-toggle').textContent = state.source ? 'Formatted text' : 'Markdown source';
+    el('em-save-label').textContent = current.previewOnly ? 'Draft in this preview' : 'Saved locally';
+    el('em-reference').hidden = !state.beside;
+    if (state.beside) el('em-reference-copy').innerHTML = documents.find(doc => doc.id === state.beside).body;
+    renderList();
+  }
+  function closePicker() {
+    el('em-beside-picker').hidden = true;
+    el('em-beside-toggle').setAttribute('aria-expanded', 'false');
+  }
+  el('em-documents-toggle').addEventListener('click', () => { state.documents = !state.documents; render(); });
+  el('em-search').addEventListener('input', renderList);
+  el('em-doc-list').addEventListener('click', event => {
+    const button = event.target.closest('[data-doc]');
+    if (!button) return;
+    state.active = button.dataset.doc;
+    if (state.active === state.beside) state.beside = null;
+    closePicker(); render();
+    root.querySelector('[data-doc="' + state.active + '"]')?.focus();
+    el('em-demo-status').textContent = 'Opened ' + documents.find(doc => doc.id === state.active).name + ' · sample document';
+  });
+  el('em-source-toggle').addEventListener('click', () => { state.source = !state.source; render(); });
+  el('em-beside-toggle').addEventListener('click', () => {
+    if (!el('em-beside-picker').hidden) { closePicker(); return; }
+    el('em-pick-list').innerHTML = documents.filter(doc => doc.id !== state.active).map(doc => '<button class="em-control" type="button" data-beside="' + doc.id + '">' + escape(doc.name) + '</button>').join('') + '<button class="em-control em-plain" type="button" data-cancel-beside>Cancel</button>';
+    el('em-beside-picker').hidden = false;
+    el('em-beside-toggle').setAttribute('aria-expanded', 'true');
+    el('em-pick-list').querySelector('button')?.focus();
+  });
+  el('em-pick-list').addEventListener('click', event => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button.dataset.beside) state.beside = button.dataset.beside;
+    closePicker(); render(); el('em-beside-toggle').focus();
+  });
+  el('em-close-reference').addEventListener('click', () => { state.beside = null; render(); el('em-beside-toggle').focus(); });
+  el('em-new').addEventListener('click', () => { el('em-create-panel').hidden = false; el('em-new-name').focus(); });
+  el('em-cancel-new').addEventListener('click', () => { el('em-create-panel').hidden = true; el('em-new').focus(); });
+  el('em-new-name').addEventListener('input', () => { el('em-new-location').textContent = 'Field notes / ' + (el('em-new-name').value.trim() || 'Untitled document') + '.md'; });
+  el('em-create-panel').addEventListener('submit', event => {
+    event.preventDefault();
+    const name = el('em-new-name').value.trim();
+    if (!name) return;
+    const id = 'new-' + (++newCounter);
+    documents.unshift({id, name, detail: 'Just now · Drafts', body: '<h1>' + escape(name) + '</h1><p>Your new document starts here.</p>', markdown: '# ' + name + '\n\n', previewOnly: true});
+    state.active = id; state.source = false;
+    el('em-create-panel').hidden = true; el('em-new-name').value = ''; el('em-search').value = '';
+    el('em-new-location').textContent = 'Field notes / Untitled document.md';
+    render(); el('em-new').focus();
+    el('em-demo-status').textContent = 'Created in this preview only · no file has been written';
+  });
+  root.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    if (!el('em-create-panel').hidden) { el('em-create-panel').hidden = true; el('em-new').focus(); }
+    else if (!el('em-beside-picker').hidden) { closePicker(); el('em-beside-toggle').focus(); }
+  });
+  render();
+  if (globalThis.Tweak) {
+    const tweak = new Tweak({container: root, onChange: render});
+    tweak.addSelect(state, 'navigation', {label: 'Document navigation', options: [{label: 'Compact list', value: 'list'}, {label: 'Paper thumbnails', value: 'paper'}]});
+    tweak.addToggle(state, 'documents', {label: 'Show document navigation'});
+  }
+})();
+</script>

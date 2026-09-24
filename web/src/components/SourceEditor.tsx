@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
-import { EditorState } from '@codemirror/state'
+import { Annotation, EditorState, Transaction } from '@codemirror/state'
 import { drawSelection, EditorView, keymap, placeholder } from '@codemirror/view'
 import { tags as t } from '@lezer/highlight'
 
@@ -36,14 +36,20 @@ const theme = EditorView.theme({
   '.cm-placeholder': { color: 'var(--faint-ink)' },
 })
 
+// Marks a change that brings in text from another pane, so that it is not sent back as an edit.
+const external = Annotation.define<boolean>()
+
 type Props = {
   initial: string
+  /** The current text of the document; it changes when another pane edits the same document. */
+  content: string
   onChange: (markdown: string) => void
   onReady?: () => void
 }
 
-export function SourceEditor({ initial, onChange, onReady }: Props) {
+export function SourceEditor({ initial, content, onChange, onReady }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
   const onReadyRef = useRef(onReady)
   onChangeRef.current = onChange
@@ -64,14 +70,37 @@ export function SourceEditor({ initial, onChange, onReady }: Props) {
           placeholder('Start writing…'),
           theme,
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) onChangeRef.current(update.state.doc.toString())
+            if (update.docChanged && !update.transactions.some((tr) => tr.annotation(external))) {
+              onChangeRef.current(update.state.doc.toString())
+            }
           }),
         ],
       }),
     })
+    viewRef.current = view
     onReadyRef.current?.()
-    return () => view.destroy()
+    return () => {
+      viewRef.current = null
+      view.destroy()
+    }
   }, [initial])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const old = view.state.doc.toString()
+    if (old === content) return
+    // Replace only the changed part, so the cursor and the scroll stay.
+    let start = 0
+    while (start < old.length && start < content.length && old[start] === content[start]) start++
+    let endOld = old.length
+    let endNew = content.length
+    while (endOld > start && endNew > start && old[endOld - 1] === content[endNew - 1]) {
+      endOld--
+      endNew--
+    }
+    view.dispatch({ changes: { from: start, to: endOld, insert: content.slice(start, endNew) }, annotations: [external.of(true), Transaction.addToHistory.of(false)] })
+  }, [content])
 
   return <div ref={rootRef} className="editor editor-source" />
 }

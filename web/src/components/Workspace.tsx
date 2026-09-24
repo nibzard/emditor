@@ -13,9 +13,10 @@ type Props = {
   dispatch: Dispatch<WorkAction>
   focusSignal: number
   onPick: (index: number) => void
+  onSplit: (path: string) => void
 }
 
-export function Workspace({ work, dispatch, focusSignal, onPick }: Props) {
+export function Workspace({ work, dispatch, focusSignal, onPick, onSplit }: Props) {
   const sync = useMemo(() => new ScrollSync(), [])
   useEffect(() => {
     sync.enabled = work.lock
@@ -47,6 +48,7 @@ export function Workspace({ work, dispatch, focusSignal, onPick }: Props) {
               onMode={(mode) => dispatch({ type: 'mode', index: i, mode })}
               onClose={() => dispatch({ type: 'close', index: i })}
               onPick={() => onPick(i)}
+              onSplit={() => pane.path && onSplit(pane.path)}
             />
           )
         })}

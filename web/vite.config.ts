@@ -7,6 +7,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: '127.0.0.1',
     proxy: {
       '/api': 'http://127.0.0.1:4747',
       '/files': 'http://127.0.0.1:4747',

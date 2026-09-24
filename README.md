@@ -2,11 +2,14 @@
 
 A small local Markdown desk for macOS. One Rust binary starts a local server and opens the app in your browser.
 
-- **Desk**: every Markdown file in the folder as an A4 thumbnail. Sort by recent, name, or by hand. Stack files together.
-- **Workspace**: one to six panes side by side, each on an A4 sheet, in rich text or Markdown source mode.
-- **Scroll lock**: scroll one pane, and all panes move by the same distance.
+- **Documents**: a visible, searchable list for moving between files. The most recently edited document opens when you start.
+- **Workspace**: write in rich text or Markdown source mode. Open another document beside the current one when you need to compare them, and choose an arrangement from **Arrange**.
+- **Paper desk**: see every Markdown file as an A4 thumbnail. Sort and stack files; open a stack to choose an individual document.
+- **Scroll together**: when several panes are open, scroll them by the same distance.
 - Rich mode can only make what Markdown can store (CommonMark + GFM tables, task lists, strikethrough).
-- Autosave, conflict detection when a file changes on disk, and print to real A4 pages.
+- Autosave, a local draft kept until a save succeeds, conflict recovery when a file changes on disk, and print to real A4 pages.
+
+Use **New document** to create a file. **Find** (⌘K) opens an existing file. Switching panes or editing modes keeps the same draft. If a save fails or a file changes on disk, the pane shows actions to retry, keep your draft, or load the disk version.
 
 ## Use
 
@@ -23,11 +26,15 @@ The server listens on 127.0.0.1 only and refuses requests from other hosts, orig
 
 | Keys | Action |
 | --- | --- |
-| ⌘K | Find or create a document |
+| ⌘K | Find a document |
+| ⌥N | New document |
+| ⌥T | Theme: system, light, dark |
 | ⌥0 | Desk or workspace |
 | ⌥1 – ⌥7 | Layout: one, two, three, 2×2, one + two, rows, 3×2 |
 | ⌃H ⌃J ⌃K ⌃L | Focus pane left, down, up, right (add ⇧ to move the pane) |
-| ⌥L | Scroll lock |
+| ⌥L | Scroll together |
+| ⌥F | Focus mode |
+| ⌘= ⌘− ⌘0 | Zoom the paper in, out, actual size |
 | ⌘/ | Rich text or Markdown source |
 | ⌥W | Close pane |
 | ⌘S | Save all now |
@@ -38,7 +45,10 @@ On the desk: arrows move, ↵ opens (⇧↵ in a new pane), space or ⌘-click s
 ## Develop
 
 ```sh
-cargo run -- ~/notes --no-open    # API on 127.0.0.1:4747
-cd web && npm run dev             # Vite on :5173, forwards /api and /files
+cd web && npm ci                 # first setup
+cd .. && npm run dev             # Rust API and Vite; edit the current folder
+npm run dev -- ~/notes           # or edit another folder
 make test
 ```
+
+Open http://127.0.0.1:5173/. Press Ctrl+C to stop both servers.

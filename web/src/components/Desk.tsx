@@ -1,7 +1,7 @@
 // ABOUTME: The desk: every Markdown file in the folder as an A4 thumbnail, plus stacks of files.
 // ABOUTME: Sort, select, stack, reorder, and open documents with the mouse or the keyboard.
 
-import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
+import { AnimatePresence, LayoutGroup } from 'motion/react'
 import { type CSSProperties, type MouseEvent, useCallback, useEffect, useRef, useState } from 'react'
 import type { Listing } from '../api'
 import { useStoredState } from '../hooks/useStoredState'
@@ -10,6 +10,7 @@ import { DeskCard, type DropZone } from './DeskCard'
 import { Enso } from './Enso'
 import { MinusIcon, PlusIcon } from './icons'
 import { Segmented } from './Segmented'
+import { StackDetails } from './StackDetails'
 
 const THUMB_SIZES = [128, 164, 212, 268]
 const SORTS: SortMode[] = ['recent', 'name', 'manual']
@@ -40,6 +41,7 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [dropHint, setDropHint] = useState<{ key: string; zone: DropZone } | null>(null)
+  const [expandedStack, setExpandedStack] = useState<string | null>(null)
   const gridRef = useRef<HTMLDivElement>(null)
 
   const thumbWidth = THUMB_SIZES[Math.max(0, Math.min(THUMB_SIZES.length - 1, size))]
@@ -74,9 +76,11 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
   }, [])
 
   useEffect(() => {
-    if (!active) return
+    if (!active || expandedStack) return
     const onKey = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target) || e.ctrlKey) return
+      const target = e.target as HTMLElement
+      const card = target.closest?.('.card-body')
+      if (isTypingTarget(e.target) || e.ctrlKey || (target !== document.body && !card)) return
       const move = (delta: number) => {
         e.preventDefault()
         setKeyboard(true)
@@ -106,7 +110,8 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
         case 'Enter': {
           e.preventDefault()
           const chosen = selected.size > 0 ? items.filter((i) => selected.has(i.key)) : current ? [current] : []
-          openItems(chosen, e.shiftKey)
+          if (chosen.length === 1 && chosen[0].kind === 'stack') setExpandedStack(chosen[0].key)
+          else openItems(chosen, e.shiftKey)
           return
         }
         case ' ':
@@ -144,12 +149,13 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [active, items, current, selected, desk, setDesk, openItems, stackChosen, columns, onNew, onBack, setSize])
+  }, [active, expandedStack, items, current, selected, desk, setDesk, openItems, stackChosen, columns, onNew, onBack, setSize])
 
   useEffect(() => {
     if (!keyboard) return
     const card = gridRef.current?.children[cursor] as HTMLElement | undefined
     card?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    card?.querySelector<HTMLElement>('.card-body')?.focus({ preventScroll: true })
   }, [cursor, keyboard])
 
   useEffect(() => {
@@ -169,18 +175,20 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
       })
       return
     }
-    openItems([item], e.shiftKey)
+    if (item.kind === 'stack') setExpandedStack(item.key)
+    else openItems([item], e.shiftKey)
   }
 
   const onDrop = (target: DeskItem, zone: DropZone) => {
     if (dragKey && dragKey !== target.key) {
-      setDesk(zone === 'stack' ? stackItems(desk, items, [target.key, dragKey]) : moveItem(desk, items, dragKey, target.key, zone))
+      setDesk(moveItem(desk, items, dragKey, target.key, zone))
     }
     setDragKey(null)
     setDropHint(null)
   }
 
   const style = { '--thumb-w': `${thumbWidth}px`, '--thumb-scale': thumbWidth / PAGE_WIDTH_PX } as CSSProperties
+  const currentStack = items.find((item): item is Extract<DeskItem, { kind: 'stack' }> => item.kind === 'stack' && item.key === expandedStack)
 
   return (
     <div className="desk" style={style} data-keyboard={keyboard}>
@@ -204,18 +212,22 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
             ]}
           />
           <span className="tool-group">
-            <button className="icon-btn" onClick={() => setSize((s) => Math.max(0, s - 1))} title="Smaller (−)" aria-label="Smaller thumbnails">
+            <button className="icon-btn" onClick={() => setSize((s) => Math.max(0, s - 1))} data-tip="Smaller −" aria-label="Smaller thumbnails">
               <MinusIcon />
             </button>
-            <button className="icon-btn" onClick={() => setSize((s) => Math.min(THUMB_SIZES.length - 1, s + 1))} title="Larger (+)" aria-label="Larger thumbnails">
+            <button className="icon-btn" onClick={() => setSize((s) => Math.min(THUMB_SIZES.length - 1, s + 1))} data-tip="Larger +" aria-label="Larger thumbnails">
               <PlusIcon />
             </button>
           </span>
-          <button className="btn" onClick={onNew} title="New document (N)">
-            New
-          </button>
         </div>
       </header>
+
+      {selected.size > 0 && <div className="selection-actions" role="toolbar" aria-label="Selected documents">
+        <span>{selected.size} selected</span>
+        <button className="text-btn" onClick={() => { openItems(items.filter((item) => selected.has(item.key)), false); setSelected(new Set()) }}>Open selected</button>
+        {selected.size > 1 && <button className="text-btn" onClick={() => { setDesk(stackItems(desk, items, items.filter((item) => selected.has(item.key)).map((item) => item.key))); setSelected(new Set()) }}>Stack selected</button>}
+        <button className="text-btn" onClick={() => setSelected(new Set())}>Clear selection</button>
+      </div>}
 
       {items.length === 0 ? (
         <div className="desk-empty">
@@ -240,6 +252,7 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
                   drop={dropHint?.key === item.key ? dropHint.zone : null}
                   openPaths={openPaths}
                   onClick={onCardClick(item, i)}
+                  onFocus={() => setCursor(i)}
                   onUnstack={() => setDesk(unstack(desk, items, item.key))}
                   onDragStart={() => setDragKey(item.key)}
                   onDragOver={(zone) => dragKey && dragKey !== item.key && setDropHint({ key: item.key, zone })}
@@ -256,15 +269,10 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
         </LayoutGroup>
       )}
 
-      <motion.footer className="hints chrome" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
-        <span><kbd>↵</kbd> open</span>
-        <span><kbd>⇧↵</kbd> new pane</span>
-        <span><kbd>␣</kbd> select</span>
-        <span><kbd>G</kbd> stack</span>
-        <span><kbd>U</kbd> unstack</span>
-        <span><kbd>⌥←→</kbd> move</span>
-        <span><kbd>?</kbd> all keys</span>
-      </motion.footer>
+      {currentStack && <StackDetails item={currentStack} onOpen={(path, beside) => { setExpandedStack(null); onOpen(path, beside ? 'new' : 'slot') }}
+        onOpenMany={(paths) => { setExpandedStack(null); onOpenMany(paths) }}
+        onUnstack={() => { setDesk(unstack(desk, items, currentStack.key)); setExpandedStack(null) }}
+        onClose={() => setExpandedStack(null)} />}
     </div>
   )
 }

@@ -2,26 +2,32 @@
 // ABOUTME: It owns the global keyboard shortcuts, the palette, and state kept per folder.
 
 import { AnimatePresence, motion } from 'motion/react'
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { api, ApiError, type Listing } from './api'
 import { Desk, isTypingTarget } from './components/Desk'
+import { DocumentNavigation } from './components/DocumentNavigation'
 import { Enso } from './components/Enso'
-import { LockIcon } from './components/icons'
+import { BackIcon, DarkThemeIcon, ExitFocusIcon, FocusIcon, LightThemeIcon, LockIcon, NewDocumentIcon, OpenBesideIcon, SearchIcon, ShortcutsIcon, SidebarIcon, SystemThemeIcon, ZoomInIcon, ZoomOutIcon } from './components/icons'
 import { LayoutPicker } from './components/LayoutPicker'
+import { NewDocument } from './components/NewDocument'
 import { Palette } from './components/Palette'
-import { Segmented } from './components/Segmented'
 import { Shortcuts } from './components/Shortcuts'
 import { Workspace } from './components/Workspace'
-import { SAVE_ALL_EVENT } from './hooks/useDocument'
+import { DocumentProvider, useDocumentProblems } from './hooks/useDocument'
 import { readStored, useStoredState } from './hooks/useStoredState'
+import { useTheme } from './hooks/useTheme'
 import { buildDesk, type DeskState, EMPTY_DESK } from './lib/desk'
 import { type Direction, LAYOUTS } from './lib/layouts'
 import { titleFromPath } from './lib/text'
+import { nextTheme, type ThemeChoice } from './lib/theme'
+import { zoomLabel, zoomStep } from './lib/zoom'
 import { initialWork, type OpenTarget, type Work, workReducer } from './lib/workspace'
 
 type View = 'desk' | 'work'
 
 const PANE_KEYS: Record<string, Direction> = { KeyH: 'left', KeyJ: 'down', KeyK: 'up', KeyL: 'right' }
+
+const THEME_LABEL: Record<ThemeChoice, string> = { system: 'Theme: system', light: 'Theme: light', dark: 'Theme: dark' }
 
 export default function App() {
   const [listing, setListing] = useState<Listing | null>(null)
@@ -39,16 +45,20 @@ export default function App() {
         <Enso size={56} />
       </div>
     )
-  return <Main key={listing.path} initialListing={listing} />
+  return <DocumentProvider key={listing.path} root={listing.path}><Main initialListing={listing} /></DocumentProvider>
 }
 
 function startWork(listing: Listing): Work {
   const stored = readStored<Work | null>(`emditor.work:${listing.path}`, null)
-  let work = stored && Array.isArray(stored.panes) && stored.panes.length > 0 ? stored : initialWork()
+  const restored = Boolean(stored && Array.isArray(stored.panes) && stored.panes.length > 0)
+  let work = restored ? stored! : initialWork()
   work = workReducer(work, { type: 'prune', existing: listing.files.map((f) => f.path) })
   const fromUrl = new URLSearchParams(location.search).get('file')
   if (fromUrl && listing.files.some((f) => f.path === fromUrl)) {
     work = workReducer(work, { type: 'open', path: fromUrl, where: 'slot' })
+  } else if (!restored && listing.files.length > 0) {
+    const recent = listing.files.reduce((latest, file) => file.modified > latest.modified ? file : latest)
+    work = workReducer(work, { type: 'open', path: recent.path, where: 'slot' })
   }
   return work
 }
@@ -58,12 +68,17 @@ function Main({ initialListing }: { initialListing: Listing }) {
   const root = listing.path
   const [desk, setDesk] = useStoredState<DeskState>(`emditor.desk:${root}`, EMPTY_DESK)
   const [work, dispatch] = useReducer(workReducer, initialListing, startWork)
-  const [view, setView] = useState<View>(() => (work.panes.some((p) => p.path) ? 'work' : 'desk'))
+  const [view, setView] = useState<View>('work')
+  const [showDocuments, setShowDocuments] = useStoredState(`emditor.documents${window.matchMedia('(max-width: 580px)').matches ? '.mobile' : ''}:${root}`, !window.matchMedia('(max-width: 580px)').matches)
+  const [focusMode, setFocusMode] = useState(false)
+  const [zoom, setZoom] = useStoredState(`emditor.zoom:${root}`, 1)
+  const { choice: themeChoice, setChoice: setThemeChoice } = useTheme()
   const [palette, setPalette] = useState<{ target: OpenTarget; title: string } | null>(null)
+  const [newDialog, setNewDialog] = useState(false)
   const [shortcuts, setShortcuts] = useState(false)
   const [focusSignal, setFocusSignal] = useState(0)
-  const [quiet, setQuiet] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const problems = useDocumentProblems()
 
   const refresh = useCallback(async () => {
     try {
@@ -99,7 +114,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
 
   const items = useMemo(() => buildDesk(listing.files, desk), [listing.files, desk])
   const openPaths = useMemo(() => new Set(work.panes.flatMap((p) => (p.path ? [p.path] : []))), [work.panes])
-  const focusedPath = work.panes[work.focus]?.path
+  const focusedPath = work.panes[work.focus]?.path ?? null
 
   useEffect(() => {
     document.title = view === 'work' && focusedPath ? `${titleFromPath(focusedPath)} — emditor` : `${listing.root} — emditor`
@@ -108,35 +123,49 @@ function Main({ initialListing }: { initialListing: Listing }) {
   const bumpFocus = () => setFocusSignal((n) => n + 1)
 
   const openDoc = useCallback((path: string, where: OpenTarget) => {
+    if (where === 'new' && work.panes.filter((pane) => pane.path).length >= 6) {
+      setToast('Six documents are open. Close one before opening another beside it.')
+      return
+    }
     dispatch({ type: 'open', path, where })
     setView('work')
     setPalette(null)
+    if (window.matchMedia('(max-width: 580px)').matches) setShowDocuments(false)
     setFocusSignal((n) => n + 1)
-  }, [])
+  }, [work.panes, setShowDocuments])
 
   const openMany = useCallback((paths: string[]) => {
     dispatch({ type: 'openMany', paths })
+    if (paths.length > 6) setToast('Opened the first six documents. The others are still available in the stack.')
     setView('work')
     setFocusSignal((n) => n + 1)
   }, [])
 
-  const createDoc = async (path: string, where: OpenTarget) => {
+  const createDoc = async (path: string): Promise<string | null> => {
     try {
       await api.create(path, `# ${titleFromPath(path)}\n\n`)
     } catch (err) {
-      if (!(err instanceof ApiError && err.code === 'exists')) {
-        console.error(`emditor: cannot create ${path}`, err)
-        setToast(err instanceof ApiError && err.code === 'not-found' ? 'That folder does not exist.' : `Cannot create ${path}.`)
-        return
-      }
+      console.error(`emditor: cannot create ${path}`, err)
+      if (err instanceof ApiError && err.code === 'exists') return 'A document with that name already exists.'
+      return err instanceof ApiError && err.code === 'not-found' ? 'That folder does not exist.' : `Cannot create ${path}.`
     }
     await refresh()
-    openDoc(path, where)
+    setNewDialog(false)
+    openDoc(path, 'slot')
+    return null
   }
 
   const openPalette = useCallback((target: OpenTarget) => {
-    const title = typeof target === 'number' ? `Open in pane ${target + 1}` : 'Open in the focused pane'
+    const title = target === 'new' ? 'Open beside this document' : typeof target === 'number' ? `Open in pane ${target + 1}` : 'Find a document'
+    setNewDialog(false)
+    setShortcuts(false)
     setPalette({ target, title })
+  }, [])
+
+  const openNew = useCallback(() => {
+    setPalette(null)
+    setShortcuts(false)
+    setNewDialog(true)
   }, [])
 
   const switchView = useCallback((next: View) => {
@@ -155,15 +184,18 @@ function Main({ initialListing }: { initialListing: Listing }) {
       }
       if (e.metaKey && code === 'KeyS') {
         e.preventDefault()
-        window.dispatchEvent(new Event(SAVE_ALL_EVENT))
+        window.dispatchEvent(new Event('emditor:save-all'))
         return
       }
-      if (palette) return
-      if (shortcuts) {
-        if (e.key === 'Escape' || (e.altKey && code === 'Slash')) {
-          e.preventDefault()
-          setShortcuts(false)
-        }
+      if (e.metaKey && !e.altKey && !e.ctrlKey && view === 'work' && (code === 'Equal' || code === 'Minus' || code === 'Digit0')) {
+        // Zoom the paper, not the whole page with the app controls.
+        e.preventDefault()
+        setZoom((current) => code === 'Digit0' ? 1 : zoomStep(current, code === 'Equal' ? 1 : -1))
+        return
+      }
+      if (palette || newDialog || shortcuts) return
+      if (e.key === 'Escape' && focusMode && view === 'work' && !(e.target instanceof HTMLInputElement)) {
+        setFocusMode(false)
         return
       }
       if (e.altKey && !e.metaKey && !e.ctrlKey) {
@@ -179,6 +211,9 @@ function Main({ initialListing }: { initialListing: Listing }) {
         } else if (code === 'KeyL') {
           e.preventDefault()
           dispatch({ type: 'lock' })
+        } else if (code === 'KeyF' && view === 'work') {
+          e.preventDefault()
+          setFocusMode((current) => !current)
         } else if (code === 'KeyW' && view === 'work') {
           e.preventDefault()
           dispatch({ type: 'close', index: work.focus })
@@ -188,7 +223,10 @@ function Main({ initialListing }: { initialListing: Listing }) {
           setShortcuts(true)
         } else if (code === 'KeyN') {
           e.preventDefault()
-          openPalette('focused')
+          openNew()
+        } else if (code === 'KeyT') {
+          e.preventDefault()
+          setThemeChoice(nextTheme)
         }
         return
       }
@@ -213,68 +251,72 @@ function Main({ initialListing }: { initialListing: Listing }) {
     // Capture phase, so that the editors do not take these keys first.
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [palette, shortcuts, view, work.focus, openPalette, switchView])
-
-  useEffect(() => {
-    const onType = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1) return
-      if ((e.target as HTMLElement).closest?.('.pane-scroll')) setQuiet(true)
-    }
-    const onMove = () => setQuiet(false)
-    window.addEventListener('keydown', onType)
-    window.addEventListener('mousemove', onMove)
-    return () => {
-      window.removeEventListener('keydown', onType)
-      window.removeEventListener('mousemove', onMove)
-    }
-  }, [])
+  }, [palette, newDialog, shortcuts, focusMode, view, work.focus, openPalette, openNew, switchView, setZoom, setThemeChoice])
 
   const hasDocs = work.panes.some((p) => p.path)
 
   return (
-    <div className="app" data-quiet={quiet && view === 'work'}>
-      <header className="topbar chrome">
+    <div className="app" data-focus={focusMode && view === 'work'}>
+      <header className="topbar">
         <div className="topbar-left">
+          <button className="icon-btn" data-tip={view === 'desk' ? 'Back to writing ⌥0' : 'Documents'}
+            aria-label={view === 'desk' ? 'Back to writing' : 'Documents'} onClick={() => {
+            if (view === 'desk') switchView('work')
+            else { setFocusMode(false); setShowDocuments((current) => !current) }
+          }} aria-expanded={view === 'work' ? showDocuments && !focusMode : undefined}>
+            {view === 'desk' ? <BackIcon /> : <SidebarIcon />}
+          </button>
           <span className="brand-seal" aria-hidden />
           <span className="root-name" title={listing.path}>
             {listing.root}
           </span>
         </div>
-        <Segmented
-          id="view"
-          value={view}
-          onChange={switchView}
-          options={[
-            { value: 'desk', label: 'Desk', title: 'Desk (⌥0)' },
-            { value: 'work', label: 'Workspace', title: 'Workspace (⌥0)' },
-          ]}
-        />
         <div className="topbar-right">
           <AnimatePresence initial={false}>
             {view === 'work' && (
               <motion.div className="tool-group" initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 6 }}>
+                {hasDocs && work.panes.filter((pane) => pane.path).length < 6 && <button className="icon-btn" onClick={() => openPalette('new')}
+                  data-tip="Open beside" aria-label="Open beside…"><OpenBesideIcon /></button>}
                 <LayoutPicker value={work.layout} onChange={(id) => dispatch({ type: 'layout', id })} />
-                <button
-                  className="icon-btn lock-btn"
-                  data-on={work.lock}
-                  onClick={() => dispatch({ type: 'lock' })}
-                  title={work.lock ? 'Scroll lock is on (⌥L)' : 'Lock scroll of all panes (⌥L)'}
-                  aria-pressed={work.lock}
-                >
+                {work.panes.length > 1 && <button className="icon-btn lock-btn" data-on={work.lock}
+                  onClick={() => dispatch({ type: 'lock' })} data-tip="Scroll together ⌥L" aria-label="Scroll together" aria-pressed={work.lock}>
                   <LockIcon locked={work.lock} />
+                </button>}
+                <button className="icon-btn" onClick={() => { setFocusMode((current) => !current); bumpFocus() }} aria-pressed={focusMode}
+                  data-tip={focusMode ? 'Exit focus ⌥F' : 'Focus ⌥F'} aria-label={focusMode ? 'Exit focus' : 'Focus'}>
+                  {focusMode ? <ExitFocusIcon /> : <FocusIcon />}
                 </button>
+                <span className="tool-divider" aria-hidden />
+                <button className="icon-btn" onClick={() => setZoom((current) => zoomStep(current, -1))} data-tip="Zoom out ⌘−" aria-label="Zoom out"><ZoomOutIcon /></button>
+                <button className="zoom-level" onClick={() => setZoom(1)} data-tip="Actual size ⌘0" aria-label={`Zoom ${zoomLabel(zoom)}, reset to actual size`}>{zoomLabel(zoom)}</button>
+                <button className="icon-btn" onClick={() => setZoom((current) => zoomStep(current, 1))} data-tip="Zoom in ⌘=" aria-label="Zoom in"><ZoomInIcon /></button>
+                <span className="tool-divider" aria-hidden />
               </motion.div>
             )}
           </AnimatePresence>
-          <button className="icon-btn" onClick={() => setShortcuts(true)} title="Keyboard shortcuts (⌥/)" aria-label="Keyboard shortcuts">
-            <span className="qmark">?</span>
+          <button className="icon-btn" onClick={() => openPalette('focused')} data-tip="Find ⌘K" aria-label="Find"><SearchIcon /></button>
+          <button className="icon-btn" onClick={openNew} data-tip="New document ⌥N" aria-label="New document"><NewDocumentIcon /></button>
+          <button className="icon-btn" onClick={() => setThemeChoice(nextTheme)} data-tip={`${THEME_LABEL[themeChoice]} ⌥T`} aria-label={THEME_LABEL[themeChoice]}>
+            {themeChoice === 'dark' ? <DarkThemeIcon /> : themeChoice === 'light' ? <LightThemeIcon /> : <SystemThemeIcon />}
+          </button>
+          <button className="icon-btn" onClick={() => setShortcuts(true)} data-tip="Keyboard shortcuts ?" aria-label="Keyboard shortcuts">
+            <ShortcutsIcon />
           </button>
         </div>
       </header>
 
       <main className="stage">
-        <div className="work-layer" inert={view === 'desk'}>
-          <Workspace work={work} dispatch={dispatch} focusSignal={focusSignal} onPick={(i) => openPalette(i)} />
+        <div className="work-layer" inert={view === 'desk' || Boolean(palette || newDialog || shortcuts)}>
+          {view === 'work' && showDocuments && !focusMode && <DocumentNavigation files={listing.files} openPaths={openPaths}
+            focusedPath={focusedPath} shelf={work.shelf} problems={problems} onOpen={(path) => openDoc(path, 'slot')}
+            onDesk={() => switchView('desk')} />}
+          <div className="workspace-region" style={{ '--paper-zoom': zoom } as CSSProperties}>
+            {problems.length > 0 && view === 'work' && <div className="document-problems" role="alert">
+              <span>{problems.length === 1 ? `${titleFromPath(problems[0].path)} needs attention.` : `${problems.length} documents need attention.`} Your draft is kept here.</span>
+              <button className="text-btn" onClick={() => openDoc(problems[0].path, 'slot')}>Open draft</button>
+            </div>}
+            <Workspace work={work} dispatch={dispatch} focusSignal={focusSignal} onPick={(i) => openPalette(i)} onSplit={(path) => openDoc(path, 'new')} />
+          </div>
         </div>
         <AnimatePresence>
           {view === 'desk' && (
@@ -290,11 +332,11 @@ function Main({ initialListing }: { initialListing: Listing }) {
                 items={items}
                 desk={desk}
                 setDesk={setDesk}
-                active={!palette && !shortcuts}
+                active={!palette && !newDialog && !shortcuts}
                 openPaths={openPaths}
                 onOpen={openDoc}
                 onOpenMany={openMany}
-                onNew={() => openPalette('slot')}
+                onNew={openNew}
                 onBack={() => hasDocs && switchView('work')}
               />
             </motion.div>
@@ -308,22 +350,19 @@ function Main({ initialListing }: { initialListing: Listing }) {
             files={listing.files}
             title={palette.title}
             onOpen={(path, newPane) => openDoc(path, newPane ? 'new' : palette.target)}
-            onCreate={(path, newPane) => {
-              setPalette(null)
-              void createDoc(path, newPane ? 'new' : palette.target)
-            }}
             onClose={() => {
               setPalette(null)
               bumpFocus()
             }}
           />
         )}
+        {newDialog && <NewDocument files={listing.files} onCreate={createDoc} onClose={() => setNewDialog(false)} />}
         {shortcuts && <Shortcuts onClose={() => setShortcuts(false)} />}
       </AnimatePresence>
 
       <AnimatePresence>
         {toast && (
-          <motion.div className="toast" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}>
+          <motion.div className="toast" role="status" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}>
             {toast}
           </motion.div>
         )}

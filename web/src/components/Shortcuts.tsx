@@ -1,26 +1,30 @@
 // ABOUTME: A sheet that lists every keyboard shortcut.
 // ABOUTME: Open it with ? on the desk or ⌥/ anywhere.
 
-import { motion } from 'motion/react'
+import { Dialog } from './Dialog'
 
 const GROUPS: { title: string; keys: [string, string][] }[] = [
   {
     title: 'Everywhere',
     keys: [
-      ['⌘K', 'Find or create a document'],
-      ['⌥0', 'Switch desk and workspace'],
+      ['⌘K', 'Find a document'],
+      ['⌥0', 'Show or close the paper desk'],
       ['⌘S', 'Save all now'],
+      ['⌥N', 'New document'],
+      ['⌥T', 'Theme: system, light, dark'],
       ['⌥/', 'This sheet'],
     ],
   },
   {
     title: 'Workspace',
     keys: [
-      ['⌥1 – ⌥7', 'Layout: one, two, three, 2×2, one + two, rows, 3×2'],
+      ['⌥1 – ⌥7', 'Arrange panes'],
       ['⌃H ⌃J ⌃K ⌃L', 'Focus the pane left, down, up, right'],
       ['⌃⇧H ⌃⇧J ⌃⇧K ⌃⇧L', 'Move the pane'],
       ['⌥L', 'Lock scroll of all panes'],
-      ['⌘/', 'Rich text or Markdown source'],
+      ['⌥F', 'Focus mode'],
+      ['⌘= ⌘− ⌘0', 'Zoom the paper in, out, actual size'],
+      ['⌘/', 'Formatted text or Markdown source'],
       ['⌥W', 'Close the pane'],
       ['⌘P', 'Print the focused pane on A4'],
     ],
@@ -42,22 +46,8 @@ const GROUPS: { title: string; keys: [string, string][] }[] = [
 
 export function Shortcuts({ onClose }: { onClose: () => void }) {
   return (
-    <motion.div
-      className="scrim"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      onMouseDown={onClose}
-    >
-      <motion.div
-        className="sheet-panel"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 6 }}
-        transition={{ type: 'spring', stiffness: 480, damping: 36 }}
-        role="dialog"
-        aria-label="Keyboard shortcuts"
-      >
+    <Dialog title="Keyboard shortcuts" onClose={onClose}>{(dismiss) => <>
+        <div className="dialog-heading"><h2>Keyboard shortcuts</h2><button className="text-btn" onClick={dismiss}>Close</button></div>
         {GROUPS.map((group) => (
           <section key={group.title}>
             <h2>{group.title}</h2>
@@ -71,7 +61,7 @@ export function Shortcuts({ onClose }: { onClose: () => void }) {
             </dl>
           </section>
         ))}
-      </motion.div>
-    </motion.div>
+      </>}
+    </Dialog>
   )
 }

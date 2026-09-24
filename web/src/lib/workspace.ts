@@ -45,7 +45,8 @@ export function initialWork(): Work {
 }
 
 function pushShelf(shelf: string[], paths: string[]): string[] {
-  return [...paths, ...shelf.filter((p) => !paths.includes(p))].slice(0, SHELF_SIZE)
+  const unique = [...new Set(paths)]
+  return [...unique, ...shelf.filter((p) => !unique.includes(p))].slice(0, SHELF_SIZE)
 }
 
 function pad(panes: PaneState[], count: number, mode: Mode): PaneState[] {
@@ -87,7 +88,8 @@ function setLayout(w: Work, id: LayoutId): Work {
 }
 
 function open(w: Work, path: string, where: OpenTarget): Work {
-  const existing = w.panes.findIndex((p) => p.path === path)
+  // A new pane can show a document that another pane already shows, to see two parts of it.
+  const existing = where === 'new' ? -1 : w.panes.findIndex((p) => p.path === path)
   if (existing >= 0) return { ...w, focus: existing }
   const filled = w.panes.filter((p) => p.path)
   if (where === 'new' && filled.length < MAX_PANES) {
@@ -104,13 +106,14 @@ function open(w: Work, path: string, where: OpenTarget): Work {
 }
 
 function openMany(w: Work, paths: string[]): Work {
-  const unique = [...new Set(paths)].slice(0, MAX_PANES)
+  const all = [...new Set(paths)]
+  const unique = all.slice(0, MAX_PANES)
   if (unique.length === 0) return w
   const layout = layoutForCount(unique.length)
   const reused = (path: string) => w.panes.find((p) => p.path === path) ?? newPane(path, w.defaultMode)
   const panes = pad(unique.map(reused), layout.cells.length, w.defaultMode)
   const hidden = w.panes.filter((p) => p.path && !unique.includes(p.path)).map((p) => p.path!)
-  return { ...w, layout: layout.id, panes, focus: 0, shelf: pushShelf(w.shelf, hidden) }
+  return { ...w, layout: layout.id, panes, focus: 0, shelf: pushShelf(w.shelf, [...all.slice(MAX_PANES), ...hidden]) }
 }
 
 function close(w: Work, index: number): Work {

@@ -17,4 +17,4 @@ install: web
 	cargo install --path .
 
 dev:
-	@echo "Run 'cargo run -- <folder> --no-open' and 'cd web && npm run dev' in two terminals."
+	npm run dev

@@ -23,6 +23,19 @@ describe('open', () => {
     expect(paths(w)).toEqual(['a.md', 'b.md'])
   })
 
+  it('opens a document that is already open in a second pane beside it', () => {
+    const w = run({ type: 'open', path: 'a.md', where: 'slot' }, { type: 'open', path: 'a.md', where: 'new' })
+    expect(w.layout).toBe('cols2')
+    expect(paths(w)).toEqual(['a.md', 'a.md'])
+    expect(new Set(w.panes.map((p) => p.id)).size).toBe(2)
+    expect(w.focus).toBe(1)
+  })
+
+  it('closes one of two panes with the same document and keeps the other', () => {
+    const w = run({ type: 'open', path: 'a.md', where: 'slot' }, { type: 'open', path: 'a.md', where: 'new' }, { type: 'close', index: 1 })
+    expect(paths(w)).toEqual(['a.md'])
+  })
+
   it('opens in a new pane and grows the layout', () => {
     const w = run({ type: 'open', path: 'a.md', where: 'slot' }, { type: 'open', path: 'b.md', where: 'new' })
     expect(w.layout).toBe('cols2')
@@ -36,6 +49,13 @@ describe('layout', () => {
     const w = run({ type: 'openMany', paths: ['a.md', 'b.md', 'c.md', 'd.md'] })
     expect(w.layout).toBe('grid4')
     expect(paths(w)).toEqual(['a.md', 'b.md', 'c.md', 'd.md'])
+  })
+
+  it('keeps documents beyond the six visible panes available on the shelf', () => {
+    const all = ['a.md', 'b.md', 'c.md', 'd.md', 'e.md', 'f.md', 'g.md']
+    const w = run({ type: 'openMany', paths: all })
+    expect(paths(w)).toEqual(all.slice(0, 6))
+    expect(w.shelf).toContain('g.md')
   })
 
   it('keeps the focused pane when the layout gets smaller and brings the others back later', () => {
