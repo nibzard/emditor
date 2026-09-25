@@ -2,12 +2,15 @@
 // ABOUTME: Annotations anchor on this text, so marks and Markdown syntax do not change their quotes.
 
 import type { Node } from '@milkdown/kit/prose/model'
+import type { BlockKind, TextBlock } from './lint'
 
 /** A run of text that maps one to one onto document positions. */
 type Segment = { offset: number; pos: number; length: number }
 
 export interface DocText {
   text: string
+  /** Each text block, with its kind and its offsets in the text. */
+  blocks: TextBlock[]
   /** The document position of a text offset. At a boundary, 'start' takes the later run and 'end' the earlier. */
   toPos: (offset: number, side: 'start' | 'end') => number
   /** The text offset of a document position. A position between blocks goes to the start of the next text. */
@@ -18,9 +21,11 @@ export interface DocText {
 export function docText(doc: Node): DocText {
   let text = ''
   const segments: Segment[] = []
+  const blocks: TextBlock[] = []
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true
     if (segments.length > 0) text += '\n'
+    const block: TextBlock = { kind: blockKind(node), from: text.length, to: text.length }
     // An empty run at the start of each block, so that every block has a place in the map.
     segments.push({ offset: text.length, pos: pos + 1, length: 0 })
     node.forEach((child, childOffset) => {
@@ -33,6 +38,8 @@ export function docText(doc: Node): DocText {
         text += '\n'
       }
     })
+    block.to = text.length
+    blocks.push(block)
     return false
   })
 
@@ -57,5 +64,10 @@ export function docText(doc: Node): DocText {
     return text.length
   }
 
-  return { text, toPos, toOffset }
+  return { text, blocks, toPos, toOffset }
+}
+
+function blockKind(node: Node): BlockKind {
+  if (node.type.name === 'heading') return 'heading'
+  return node.type.spec.code ? 'code' : 'prose'
 }

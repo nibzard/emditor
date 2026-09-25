@@ -11,13 +11,14 @@ const schema = new Schema({
     paragraph: { group: 'block', content: 'inline*' },
     heading: { group: 'block', content: 'inline*' },
     blockquote: { group: 'block', content: 'block+' },
+    code_block: { group: 'block', content: 'text*', code: true },
     text: { group: 'inline' },
     hardbreak: { group: 'inline', inline: true },
   },
   marks: { strong: {} },
 })
 
-const { doc, paragraph: p, heading: h, blockquote: q, hardbreak } = schema.nodes
+const { doc, paragraph: p, heading: h, blockquote: q, code_block: code, hardbreak } = schema.nodes
 const t = (value: string, strong = false) => schema.text(value, strong ? [schema.marks.strong.create()] : [])
 
 // <h>Title</h> <p>One **bold** end</p> <q><p>Line<br>two</p></q>
@@ -56,6 +57,17 @@ describe('docText', () => {
     const map = docText(sample)
     expect(map.toOffset(0)).toBe(0)
     expect(map.toOffset(sample.content.size)).toBe(map.text.length)
+  })
+
+  it('gives each text block with its kind and text offsets', () => {
+    const withCode = doc.create(null, [...sample.content.content, code.create(null, t('x = 1'))])
+    const map = docText(withCode)
+    expect(map.blocks.map((b) => [b.kind, map.text.slice(b.from, b.to)])).toEqual([
+      ['heading', 'Title'],
+      ['prose', 'One bold end'],
+      ['prose', 'Line\ntwo'],
+      ['code', 'x = 1'],
+    ])
   })
 
   it('handles an empty document', () => {
