@@ -300,3 +300,170 @@ async fn notes_do_not_follow_a_sidecar_folder_link_out_of_the_root() {
     let (status, _) = send(&app, get("/api/notes?path=alpha.md")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn rules_of_a_folder_without_rules_are_empty() {
+    let (_dir, app) = setup();
+    let (status, body) = send(&app, get("/api/rules")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["content"], "");
+    assert_eq!(body["modified"], 0);
+}
+
+#[tokio::test]
+async fn writes_rules_to_the_folder_sidecar_and_reads_them_back() {
+    let (dir, app) = setup();
+    let rules = "{\"version\":1,\"kept\":[]}\n";
+    let (status, body) =
+        send(&app, json_request("PUT", "/api/rules", json!({ "content": rules, "baseModified": 0 }))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(std::fs::read_to_string(dir.path().join(".emditor/rules.json")).unwrap(), rules);
+    let modified = body["modified"].as_u64().unwrap();
+
+    let (status, body) = send(&app, get("/api/rules")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["content"], rules);
+    assert_eq!(body["modified"], modified);
+
+    // A writer that read no rules file must not overwrite the one that is there now.
+    let (status, body) =
+        send(&app, json_request("PUT", "/api/rules", json!({ "content": "{}", "baseModified": 0 }))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["error"], "conflict");
+}
+
+#[tokio::test]
+async fn rules_must_be_a_json_object() {
+    let (_dir, app) = setup();
+    for content in ["", "[]", "{nope"] {
+        let (status, body) =
+            send(&app, json_request("PUT", "/api/rules", json!({ "content": content, "baseModified": 0 }))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "bad-rules");
+    }
+}
+
+#[tokio::test]
+async fn rules_do_not_follow_a_sidecar_folder_link_out_of_the_root() {
+    let (dir, app) = setup();
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join(".emditor")).unwrap();
+    let (status, _) =
+        send(&app, json_request("PUT", "/api/rules", json!({ "content": "{}", "baseModified": 0 }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!outside.path().join("rules.json").exists());
+    let (status, _) = send(&app, get("/api/rules")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn rewrite_is_unavailable_without_a_key() {
+    let (_dir, app) = setup();
+    let (status, body) = send(&app, get("/api/rewrite")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["available"], false);
+    let (status, body) =
+        send(&app, json_request("POST", "/api/rewrite", json!({ "text": "Hello.", "context": "", "rules": [] }))).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["error"], "rewrite-unavailable");
+}
+
+type Seen = std::sync::Arc<std::sync::Mutex<Vec<(String, Value)>>>;
+
+/// A stand-in for the Anthropic Messages API. It records each request and gives the reply that the test sets.
+async fn fake_anthropic(reply: (StatusCode, Value)) -> (String, Seen) {
+    use axum::routing::post;
+    let seen: Seen = Default::default();
+    let record = seen.clone();
+    let app = Router::new().route(
+        "/v1/messages",
+        post(move |headers: axum::http::HeaderMap, axum::Json(body): axum::Json<Value>| {
+            let record = record.clone();
+            let reply = reply.clone();
+            async move {
+                let key = headers.get("x-api-key").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+                record.lock().unwrap().push((key, body));
+                (reply.0, axum::Json(reply.1))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (url, seen)
+}
+
+fn rewrite_app(dir: &TempDir, base_url: String) -> Router {
+    emditor::app_with(
+        dir.path().to_path_buf(),
+        emditor::Options {
+            rewrite: Some(emditor::RewriteConfig {
+                api_key: "test-key".into(),
+                base_url,
+                model: "test-model".into(),
+            }),
+        },
+    )
+}
+
+#[tokio::test]
+async fn rewrite_sends_the_passage_and_rules_to_claude_and_returns_the_revision() {
+    let (dir, _) = setup();
+    let reply = json!({
+        "content": [{ "type": "text", "text": "Sure.\n<revised>\nWe should talk again.\n</revised>" }],
+        "stop_reason": "end_turn",
+    });
+    let (url, seen) = fake_anthropic((StatusCode::OK, reply)).await;
+    let app = rewrite_app(&dir, url);
+
+    let (status, body) = send(&app, get("/api/rewrite")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["available"], true);
+
+    let request = json!({
+        "text": "We should circle back.",
+        "context": "Before it.",
+        "rules": ["“circle back” is on your list of phrases to avoid."],
+    });
+    let (status, body) = send(&app, json_request("POST", "/api/rewrite", request)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["text"], "We should talk again.");
+
+    let seen = seen.lock().unwrap();
+    let (key, sent) = &seen[0];
+    assert_eq!(key, "test-key");
+    assert_eq!(sent["model"], "test-model");
+    let prompt = sent["messages"][0]["content"].as_str().unwrap();
+    assert!(prompt.contains("<passage>\nWe should circle back.\n</passage>"));
+    assert!(prompt.contains("<context>\nBefore it.\n</context>"));
+    assert!(prompt.contains("- “circle back” is on your list of phrases to avoid."));
+}
+
+#[tokio::test]
+async fn rewrite_reports_a_failed_or_empty_reply() {
+    let (dir, _) = setup();
+    let request = json!({ "text": "Hello.", "context": "", "rules": [] });
+    for reply in [
+        (StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": { "message": "down" } })),
+        (StatusCode::OK, json!({ "content": [], "stop_reason": "refusal" })),
+        (StatusCode::OK, json!({ "content": [{ "type": "text", "text": "   " }], "stop_reason": "end_turn" })),
+    ] {
+        let (url, _) = fake_anthropic(reply).await;
+        let app = rewrite_app(&dir, url);
+        let (status, body) = send(&app, json_request("POST", "/api/rewrite", request.clone())).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["error"], "rewrite-failed");
+    }
+}
+
+#[tokio::test]
+async fn rewrite_refuses_empty_or_very_long_text() {
+    let (dir, _) = setup();
+    let app = rewrite_app(&dir, "http://127.0.0.1:9".into());
+    for text in ["  ".to_string(), "a".repeat(20_001)] {
+        let (status, body) =
+            send(&app, json_request("POST", "/api/rewrite", json!({ "text": text, "context": "", "rules": [] }))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "bad-rewrite");
+    }
+}

@@ -19,6 +19,11 @@ OPTIONS:
         --no-open       Do not open the browser
     -h, --help          Show this help
     -V, --version       Show the version
+
+ENVIRONMENT:
+    ANTHROPIC_API_KEY     Turns on rewrites with Claude (off when not set)
+    EMDITOR_CLAUDE_MODEL  The model for rewrites (default: claude-opus-5-5)
+    ANTHROPIC_BASE_URL    The API origin (default: https://api.anthropic.com)
 ";
 
 struct Options {
@@ -118,7 +123,12 @@ async fn main() -> ExitCode {
     if let Some(name) = &initial_file {
         url.push_str(&format!("?file={}", encode_query(name)));
     }
-    println!("emditor  {}\n         {url}\n         Ctrl+C to stop", root.display());
+    let rewrite = emditor::RewriteConfig::from_env();
+    let rewrites = match &rewrite {
+        Some(config) => format!("on ({})", config.model),
+        None => "off (set ANTHROPIC_API_KEY)".into(),
+    };
+    println!("emditor  {}\n         {url}\n         rewrites {rewrites}\n         Ctrl+C to stop", root.display());
 
     if options.open
         && let Err(err) = std::process::Command::new("open").arg(&url).spawn()
@@ -129,7 +139,7 @@ async fn main() -> ExitCode {
     let shutdown = async {
         let _ = tokio::signal::ctrl_c().await;
     };
-    if let Err(err) = axum::serve(listener, emditor::app(root))
+    if let Err(err) = axum::serve(listener, emditor::app_with(root, emditor::Options { rewrite }))
         .with_graceful_shutdown(shutdown)
         .await
     {

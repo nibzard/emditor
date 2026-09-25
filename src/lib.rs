@@ -1,5 +1,9 @@
 // ABOUTME: Core of emditor. It builds the HTTP router that serves the embedded web app
-// ABOUTME: and the JSON API that lists, reads, creates, and writes Markdown files and their notes in one folder.
+// ABOUTME: and the JSON API for the Markdown files of one folder, their notes, the folder's writing rules, and rewrites.
+
+mod rewrite;
+
+pub use rewrite::RewriteConfig;
 
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
@@ -25,6 +29,11 @@ const PREVIEW_BYTES: usize = 3000;
 const SKIPPED_DIRS: &[&str] = &["node_modules", "target"];
 /// Folder in the root that keeps the notes of each document in `<document path>.json`.
 const NOTES_DIR: &[&str] = &[".emditor", "notes"];
+/// Folder in the root that keeps the writing rules of the whole folder.
+const RULES_DIR: &[&str] = &[".emditor"];
+const RULES_FILE: &str = "rules.json";
+/// Upper limit of characters in a passage to rewrite.
+const MAX_REWRITE_CHARS: usize = 20_000;
 
 #[derive(RustEmbed)]
 #[folder = "web/dist"]
@@ -33,18 +42,36 @@ struct Assets;
 #[derive(Clone)]
 struct AppState {
     root: Arc<PathBuf>,
+    rewrite: Option<Arc<RewriteConfig>>,
+    http: reqwest::Client,
 }
 
-/// Makes the router for one root folder. All file access stays inside this folder.
+/// Settings of the server that do not come from the folder.
+#[derive(Clone, Debug, Default)]
+pub struct Options {
+    /// How to reach Claude for rewrites. None turns rewrites off.
+    pub rewrite: Option<RewriteConfig>,
+}
+
+/// Makes the router for one root folder, with rewrites off. All file access stays inside this folder.
 pub fn app(root: PathBuf) -> Router {
+    app_with(root, Options::default())
+}
+
+/// Makes the router for one root folder with the given options.
+pub fn app_with(root: PathBuf, options: Options) -> Router {
     let root = root.canonicalize().unwrap_or(root);
     let state = AppState {
         root: Arc::new(root),
+        rewrite: options.rewrite.map(Arc::new),
+        http: reqwest::Client::new(),
     };
     Router::new()
         .route("/api/files", get(list_files))
         .route("/api/file", get(read_file).put(write_file).post(create_file))
         .route("/api/notes", get(read_notes).put(write_notes))
+        .route("/api/rules", get(read_rules).put(write_rules))
+        .route("/api/rewrite", get(rewrite_status).post(rewrite_passage))
         .route("/files/{*path}", get(raw_file))
         .fallback(static_asset)
         .layer(middleware::from_fn(local_only))
@@ -55,6 +82,10 @@ pub fn app(root: PathBuf) -> Router {
 enum ApiError {
     BadPath,
     BadNotes,
+    BadRules,
+    BadRewrite,
+    RewriteUnavailable,
+    RewriteFailed,
     NotFound,
     Conflict,
     Exists,
@@ -76,6 +107,10 @@ impl IntoResponse for ApiError {
         let (status, code) = match &self {
             ApiError::BadPath => (StatusCode::BAD_REQUEST, "bad-path".to_string()),
             ApiError::BadNotes => (StatusCode::BAD_REQUEST, "bad-notes".to_string()),
+            ApiError::BadRules => (StatusCode::BAD_REQUEST, "bad-rules".to_string()),
+            ApiError::BadRewrite => (StatusCode::BAD_REQUEST, "bad-rewrite".to_string()),
+            ApiError::RewriteUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "rewrite-unavailable".to_string()),
+            ApiError::RewriteFailed => (StatusCode::BAD_GATEWAY, "rewrite-failed".to_string()),
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not-found".to_string()),
             ApiError::Conflict => (StatusCode::CONFLICT, "conflict".to_string()),
             ApiError::Exists => (StatusCode::CONFLICT, "exists".to_string()),
@@ -124,19 +159,29 @@ struct Saved {
     modified: u64,
 }
 
-/// The notes file of one document. A document without notes has empty content and modified 0.
+/// A sidecar file: the notes of one document, or the rules of the folder. A missing file has empty content and modified 0.
 #[derive(Serialize)]
-struct Notes {
+struct Sidecar {
     content: String,
     modified: u64,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct NotesBody {
+struct SidecarBody {
     content: String,
-    /// The modified time that the writer read, or 0 when it read no notes file.
+    /// The modified time that the writer read, or 0 when it read no sidecar file.
     base_modified: u64,
+}
+
+#[derive(Serialize)]
+struct RewriteStatus {
+    available: bool,
+}
+
+#[derive(Serialize)]
+struct Rewritten {
+    text: String,
 }
 
 async fn list_files(State(state): State<AppState>) -> Result<Json<Listing>, ApiError> {
@@ -215,20 +260,77 @@ async fn create_file(
 async fn read_notes(
     State(state): State<AppState>,
     Query(query): Query<PathQuery>,
-) -> Result<Json<Notes>, ApiError> {
+) -> Result<Json<Sidecar>, ApiError> {
     let doc = resolve_markdown(&state.root, &query.path)?;
     tokio::fs::metadata(&doc).await?;
-    let empty = Notes {
+    read_sidecar(notes_path(&state.root, &query.path, false)?).await
+}
+
+async fn write_notes(
+    State(state): State<AppState>,
+    Query(query): Query<PathQuery>,
+    Json(body): Json<SidecarBody>,
+) -> Result<Json<Saved>, ApiError> {
+    let doc = resolve_markdown(&state.root, &query.path)?;
+    tokio::fs::metadata(&doc).await?;
+    if !is_json_object(&body.content) {
+        return Err(ApiError::BadNotes);
+    }
+    let full = notes_path(&state.root, &query.path, true)?.ok_or(ApiError::BadPath)?;
+    write_sidecar(&full, &body).await
+}
+
+async fn read_rules(State(state): State<AppState>) -> Result<Json<Sidecar>, ApiError> {
+    read_sidecar(rules_path(&state.root, false)?).await
+}
+
+async fn write_rules(
+    State(state): State<AppState>,
+    Json(body): Json<SidecarBody>,
+) -> Result<Json<Saved>, ApiError> {
+    if !is_json_object(&body.content) {
+        return Err(ApiError::BadRules);
+    }
+    let full = rules_path(&state.root, true)?.ok_or(ApiError::BadPath)?;
+    write_sidecar(&full, &body).await
+}
+
+async fn rewrite_status(State(state): State<AppState>) -> Json<RewriteStatus> {
+    Json(RewriteStatus {
+        available: state.rewrite.is_some(),
+    })
+}
+
+async fn rewrite_passage(
+    State(state): State<AppState>,
+    Json(body): Json<rewrite::RewriteRequest>,
+) -> Result<Json<Rewritten>, ApiError> {
+    let config = state.rewrite.as_ref().ok_or(ApiError::RewriteUnavailable)?;
+    if body.text.trim().is_empty() || body.text.chars().count() > MAX_REWRITE_CHARS {
+        return Err(ApiError::BadRewrite);
+    }
+    match rewrite::rewrite(&state.http, config, &body).await {
+        Ok(text) => Ok(Json(Rewritten { text })),
+        Err(reason) => {
+            eprintln!("emditor: rewrite failed: {reason}");
+            Err(ApiError::RewriteFailed)
+        }
+    }
+}
+
+/// Reads a sidecar file. A missing file or folder gives empty content and modified 0.
+async fn read_sidecar(full: Option<PathBuf>) -> Result<Json<Sidecar>, ApiError> {
+    let empty = Sidecar {
         content: String::new(),
         modified: 0,
     };
-    let Some(full) = notes_path(&state.root, &query.path, false)? else {
+    let Some(full) = full else {
         return Ok(Json(empty));
     };
     match tokio::fs::read_to_string(&full).await {
         Ok(content) => {
             let meta = tokio::fs::metadata(&full).await?;
-            Ok(Json(Notes {
+            Ok(Json(Sidecar {
                 content,
                 modified: modified_ms(&meta),
             }))
@@ -238,20 +340,9 @@ async fn read_notes(
     }
 }
 
-async fn write_notes(
-    State(state): State<AppState>,
-    Query(query): Query<PathQuery>,
-    Json(body): Json<NotesBody>,
-) -> Result<Json<Saved>, ApiError> {
-    let doc = resolve_markdown(&state.root, &query.path)?;
-    tokio::fs::metadata(&doc).await?;
-    let is_object =
-        serde_json::from_str::<serde_json::Value>(&body.content).is_ok_and(|v| v.is_object());
-    if !is_object {
-        return Err(ApiError::BadNotes);
-    }
-    let full = notes_path(&state.root, &query.path, true)?.ok_or(ApiError::BadPath)?;
-    let current = match tokio::fs::metadata(&full).await {
+/// Writes a sidecar file when its modified time is still the one that the writer read.
+async fn write_sidecar(full: &Path, body: &SidecarBody) -> Result<Json<Saved>, ApiError> {
+    let current = match tokio::fs::metadata(full).await {
         Ok(meta) => modified_ms(&meta),
         Err(err) if err.kind() == ErrorKind::NotFound => 0,
         Err(err) => return Err(err.into()),
@@ -259,11 +350,15 @@ async fn write_notes(
     if current != body.base_modified {
         return Err(ApiError::Conflict);
     }
-    write_atomic(&full, &body.content).await?;
-    let meta = tokio::fs::metadata(&full).await?;
+    write_atomic(full, &body.content).await?;
+    let meta = tokio::fs::metadata(full).await?;
     Ok(Json(Saved {
         modified: modified_ms(&meta),
     }))
+}
+
+fn is_json_object(content: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(content).is_ok_and(|v| v.is_object())
 }
 
 /// Serves files such as images that Markdown documents refer to with relative paths.
@@ -437,8 +532,35 @@ fn notes_path(root: &Path, rel: &str, create: bool) -> Result<Option<PathBuf>, A
         .parent()
         .into_iter()
         .flat_map(|p| p.components().map(|c| c.as_os_str()));
+    let parts = NOTES_DIR.iter().map(std::ffi::OsStr::new).chain(doc_dirs);
+    let Some(dir) = sidecar_dir(root, parts, create)? else {
+        return Ok(None);
+    };
+    let name = rel_path
+        .file_name()
+        .ok_or(ApiError::BadPath)?
+        .to_string_lossy();
+    sidecar_file(root, dir.join(format!("{name}.json"))).map(Some)
+}
+
+/// Gives the rules file of the folder, with the same checks and `create` behavior as `notes_path`.
+fn rules_path(root: &Path, create: bool) -> Result<Option<PathBuf>, ApiError> {
+    let parts = RULES_DIR.iter().map(std::ffi::OsStr::new);
+    let Some(dir) = sidecar_dir(root, parts, create)? else {
+        return Ok(None);
+    };
+    sidecar_file(root, dir.join(RULES_FILE)).map(Some)
+}
+
+/// Walks down from the root through the given folders. Each folder must stay inside the root, also through
+/// symbolic links. With `create`, it makes missing folders; without it, a missing folder gives None.
+fn sidecar_dir<'a>(
+    root: &Path,
+    parts: impl Iterator<Item = &'a std::ffi::OsStr>,
+    create: bool,
+) -> Result<Option<PathBuf>, ApiError> {
     let mut dir = root.to_path_buf();
-    for part in NOTES_DIR.iter().map(std::ffi::OsStr::new).chain(doc_dirs) {
+    for part in parts {
         dir.push(part);
         match dir.canonicalize() {
             Ok(real) if real.starts_with(root) => {}
@@ -447,17 +569,17 @@ fn notes_path(root: &Path, rel: &str, create: bool) -> Result<Option<PathBuf>, A
             Err(_) => return Ok(None),
         }
     }
-    let name = rel_path
-        .file_name()
-        .ok_or(ApiError::BadPath)?
-        .to_string_lossy();
-    let full = dir.join(format!("{name}.json"));
+    Ok(Some(dir))
+}
+
+/// Refuses a sidecar file that is a symbolic link out of the root.
+fn sidecar_file(root: &Path, full: PathBuf) -> Result<PathBuf, ApiError> {
     if let Ok(target) = full.canonicalize()
         && !target.starts_with(root)
     {
         return Err(ApiError::BadPath);
     }
-    Ok(Some(full))
+    Ok(full)
 }
 
 async fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
