@@ -155,6 +155,7 @@ export class DocumentStore {
 
   getSnapshot = (path: string | null): DocumentSnapshot => path ? this.entries.get(path)?.snapshot ?? EMPTY : EMPTY
   getProblems = (): DocumentProblem[] => this.problems
+  searchableDrafts = (): { path: string; content: string }[] => [...this.drafts].map(([path, draft]) => ({ path, content: draft.content }))
   subscribeProblems = (listener: () => void) => {
     this.allListeners.add(listener)
     return () => this.allListeners.delete(listener)

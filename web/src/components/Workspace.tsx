@@ -12,13 +12,14 @@ type Props = {
   work: Work
   dispatch: Dispatch<WorkAction>
   focusSignal: number
+  searchTarget?: { path: string; line: number; id: number } | null
   onPick: (index: number) => void
   onSplit: (path: string) => void
   showNotes: boolean
   onShowNotes: (show: boolean) => void
 }
 
-export function Workspace({ work, dispatch, focusSignal, onPick, onSplit, showNotes, onShowNotes }: Props) {
+export function Workspace({ work, dispatch, focusSignal, searchTarget, onPick, onSplit, showNotes, onShowNotes }: Props) {
   const sync = useMemo(() => new ScrollSync(), [])
   useEffect(() => {
     sync.enabled = work.lock
@@ -45,6 +46,7 @@ export function Workspace({ work, dispatch, focusSignal, onPick, onSplit, showNo
               focused={i === work.focus}
               topRow={cell.row === 0}
               focusSignal={focusSignal}
+              searchTarget={i === work.focus && pane.path === searchTarget?.path ? searchTarget : null}
               sync={sync}
               style={{ gridColumn: `${cell.col + 1} / span ${cell.w}`, gridRow: `${cell.row + 1} / span ${cell.h}` }}
               onFocus={() => i !== work.focus && dispatch({ type: 'focus', index: i })}

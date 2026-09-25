@@ -21,6 +21,7 @@ use walkdir::WalkDir;
 const MAX_FILES: usize = 2000;
 /// Number of bytes from the start of each file that the listing sends for thumbnails.
 const PREVIEW_BYTES: usize = 3000;
+const SEARCH_FILE_BYTES: u64 = 2 * 1024 * 1024;
 /// Folders that the listing does not enter.
 const SKIPPED_DIRS: &[&str] = &["node_modules", "target"];
 /// Folder in the root that keeps the notes of each document in `<document path>.json`.
@@ -43,6 +44,7 @@ pub fn app(root: PathBuf) -> Router {
     };
     Router::new()
         .route("/api/files", get(list_files))
+        .route("/api/search", get(search_files))
         .route("/api/file", get(read_file).put(write_file).post(create_file))
         .route("/api/notes", get(read_notes).put(write_notes))
         .route("/files/{*path}", get(raw_file))
@@ -54,6 +56,7 @@ pub fn app(root: PathBuf) -> Router {
 #[derive(Debug)]
 enum ApiError {
     BadPath,
+    BadInput,
     BadNotes,
     NotFound,
     Conflict,
@@ -75,6 +78,7 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code) = match &self {
             ApiError::BadPath => (StatusCode::BAD_REQUEST, "bad-path".to_string()),
+            ApiError::BadInput => (StatusCode::BAD_REQUEST, "bad-input".to_string()),
             ApiError::BadNotes => (StatusCode::BAD_REQUEST, "bad-notes".to_string()),
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not-found".to_string()),
             ApiError::Conflict => (StatusCode::CONFLICT, "conflict".to_string()),
@@ -103,6 +107,18 @@ struct FileEntry {
 #[derive(Deserialize)]
 struct PathQuery {
     path: String,
+}
+
+#[derive(Deserialize)]
+struct SearchQuery {
+    q: String,
+}
+
+#[derive(Serialize)]
+struct SearchMatch {
+    path: String,
+    line: usize,
+    excerpt: String,
 }
 
 #[derive(Serialize)]
@@ -154,6 +170,47 @@ async fn list_files(State(state): State<AppState>) -> Result<Json<Listing>, ApiE
         path: state.root.display().to_string(),
         files,
     }))
+}
+
+async fn search_files(
+    State(state): State<AppState>,
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<Vec<SearchMatch>>, ApiError> {
+    let needle = query.q.trim().to_lowercase();
+    if !(2..=200).contains(&needle.chars().count()) {
+        return Err(ApiError::BadInput);
+    }
+    let root = state.root.clone();
+    let hits = tokio::task::spawn_blocking(move || {
+        let mut hits = Vec::new();
+        for entry in WalkDir::new(&*root).follow_links(false).into_iter()
+            .filter_entry(|e| e.depth() == 0 || !is_skipped(e))
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file() && is_markdown(e.path()))
+            .take(MAX_FILES)
+        {
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.len() > SEARCH_FILE_BYTES { continue; }
+            let Ok(content) = std::fs::read_to_string(entry.path()) else { continue };
+            let Ok(rel) = entry.path().strip_prefix(&*root) else { continue };
+            for (index, line) in content.lines().enumerate() {
+                if let Some(at) = line.to_lowercase().find(&needle) {
+                    let chars: Vec<char> = line.chars().collect();
+                    let position = line.to_lowercase()[..at].chars().count().min(chars.len());
+                    let start = position.saturating_sub(60);
+                    let end = (position + needle.chars().count() + 100).min(chars.len());
+                    hits.push((modified_ms(&meta), SearchMatch {
+                        path: to_slash(rel), line: index + 1,
+                        excerpt: format!("{}{}{}", if start > 0 { "…" } else { "" }, chars[start..end].iter().collect::<String>(), if end < chars.len() { "…" } else { "" }),
+                    }));
+                    break;
+                }
+            }
+        }
+        hits.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+        hits.into_iter().take(50).map(|(_, hit)| hit).collect::<Vec<_>>()
+    }).await.map_err(|err| ApiError::Io(std::io::Error::other(err)))?;
+    Ok(Json(hits))
 }
 
 async fn read_file(

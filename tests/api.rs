@@ -82,6 +82,22 @@ async fn preview_is_cut_at_a_character_boundary() {
 }
 
 #[tokio::test]
+async fn searches_beyond_thumbnails_and_skips_hidden_files() {
+    let (dir, app) = setup();
+    std::fs::write(dir.path().join("long.md"), format!("{}\nUnique passage here", "x".repeat(4000))).unwrap();
+    std::fs::write(dir.path().join(".hidden/secret.md"), "Unique passage here").unwrap();
+    let (status, body) = send(&app, get("/api/search?q=unique%20passage")).await;
+    assert_eq!(status, StatusCode::OK);
+    let hits = body.as_array().unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0]["path"], "long.md");
+    assert_eq!(hits[0]["line"], 2);
+    assert!(hits[0]["excerpt"].as_str().unwrap().contains("Unique passage"));
+    let (status, _) = send(&app, get("/api/search?q=x")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn reads_a_file() {
     let (_dir, app) = setup();
     let (status, body) = send(&app, get("/api/file?path=notes/beta.markdown")).await;

@@ -13,7 +13,7 @@ import { NewDocument } from './components/NewDocument'
 import { Palette } from './components/Palette'
 import { Shortcuts } from './components/Shortcuts'
 import { Workspace } from './components/Workspace'
-import { DocumentProvider, useDocumentProblems } from './hooks/useDocument'
+import { DocumentProvider, useDocumentProblems, useDocumentStore } from './hooks/useDocument'
 import { readStored, useStoredState } from './hooks/useStoredState'
 import { useTheme } from './hooks/useTheme'
 import { buildDesk, type DeskState, EMPTY_DESK } from './lib/desk'
@@ -80,6 +80,8 @@ function Main({ initialListing }: { initialListing: Listing }) {
   const [focusSignal, setFocusSignal] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
   const problems = useDocumentProblems()
+  const documentStore = useDocumentStore()
+  const [searchTarget, setSearchTarget] = useState<{ path: string; line: number; id: number } | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -124,6 +126,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
   const bumpFocus = () => setFocusSignal((n) => n + 1)
 
   const openDoc = useCallback((path: string, where: OpenTarget) => {
+    setSearchTarget(null)
     if (where === 'new' && work.panes.filter((pane) => pane.path).length >= 6) {
       setToast('Six documents are open. Close one before opening another beside it.')
       return
@@ -319,7 +322,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
               <span>{problems.length === 1 ? `${titleFromPath(problems[0].path)} needs attention.` : `${problems.length} documents need attention.`} Your draft is kept here.</span>
               <button className="text-btn" onClick={() => openDoc(problems[0].path, 'slot')}>Open draft</button>
             </div>}
-            <Workspace work={work} dispatch={dispatch} focusSignal={focusSignal} onPick={(i) => openPalette(i)} onSplit={(path) => openDoc(path, 'new')}
+            <Workspace work={work} dispatch={dispatch} focusSignal={focusSignal} searchTarget={searchTarget} onPick={(i) => openPalette(i)} onSplit={(path) => openDoc(path, 'new')}
               showNotes={showNotes} onShowNotes={setShowNotes} />
           </div>
         </div>
@@ -353,8 +356,22 @@ function Main({ initialListing }: { initialListing: Listing }) {
         {palette && (
           <Palette
             files={listing.files}
+            drafts={documentStore.searchableDrafts()}
             title={palette.title}
-            onOpen={(path, newPane) => openDoc(path, newPane ? 'new' : palette.target)}
+            onOpen={(path, newPane, line) => {
+              if (line) {
+                const where = newPane ? 'new' : palette.target
+                if (where === 'new' && work.panes.filter((pane) => pane.path).length >= 6) {
+                  setToast('Six documents are open. Close one before opening another beside it.')
+                  return
+                }
+                dispatch({ type: 'openMatch', path, where })
+                setSearchTarget({ path, line, id: Date.now() })
+                setView('work')
+                setPalette(null)
+                if (window.matchMedia('(max-width: 580px)').matches) setShowDocuments(false)
+              } else openDoc(path, newPane ? 'new' : palette.target)
+            }}
             onClose={() => {
               setPalette(null)
               bumpFocus()

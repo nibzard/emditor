@@ -4,6 +4,7 @@
 export type FileEntry = { path: string; modified: number; size: number; preview: string }
 export type Listing = { root: string; path: string; files: FileEntry[] }
 export type Doc = { path: string; content: string; modified: number }
+export type SearchMatch = { path: string; line: number; excerpt: string }
 /** The notes file of a document. A document without notes has empty content and modified 0. */
 export type NotesFile = { content: string; modified: number }
 
@@ -35,6 +36,7 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
 
 export const api = {
   list: () => request<Listing>('/api/files'),
+  search: (query: string) => request<SearchMatch[]>(`/api/search?q=${encodeURIComponent(query)}`),
   read: (path: string) => request<Doc>(fileUrl(path)),
   write: (path: string, content: string, baseModified?: number) =>
     request<{ modified: number }>(fileUrl(path), jsonInit('PUT', { content, baseModified })),

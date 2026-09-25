@@ -22,6 +22,7 @@ export type OpenTarget = 'focused' | 'slot' | 'new' | number
 export type WorkAction =
   | { type: 'layout'; id: LayoutId }
   | { type: 'open'; path: string; where: OpenTarget }
+  | { type: 'openMatch'; path: string; where: OpenTarget }
   | { type: 'openMany'; paths: string[] }
   | { type: 'close'; index: number }
   | { type: 'focus'; index: number }
@@ -137,6 +138,10 @@ export function workReducer(w: Work, action: WorkAction): Work {
       return setLayout(w, action.id)
     case 'open':
       return open(w, action.path, action.where)
+    case 'openMatch': {
+      const opened = open(w, action.path, action.where)
+      return { ...opened, panes: opened.panes.map((pane, index) => index === opened.focus ? { ...pane, mode: 'source' } : pane) }
+    }
     case 'openMany':
       return openMany(w, action.paths)
     case 'close':
