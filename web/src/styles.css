@@ -1,26 +1,29 @@
-/* ABOUTME: All styles of the emditor web app: quiet white paper on a warm washi background.
-   ABOUTME: Sumi ink for text, one vermilion accent, A4 sheets that print as real A4 pages. */
+/* ABOUTME: All styles of the emditor web app: off-white paper on a steel background.
+   ABOUTME: Black ink for text, one orange accent, A4 sheets that print as real A4 pages. */
 
 :root {
-  --bg: #f4f2ed;
-  --bg-2: #eae7e0;
-  --paper: #fffefb;
-  --ink: #1f1e1c;
-  --ink-2: #4a4843;
-  --muted: #676057;
-  --faint-ink: #716b62;
-  --line: #e2ded6;
-  --accent: #b5452e;
-  --accent-soft: rgba(181, 69, 46, 0.1);
-  --selection: rgba(181, 69, 46, 0.14);
-  --code-bg: #f5f2eb;
-  --code-ink: #6a5846;
-  --backdrop: rgba(244, 242, 237, 0.55);
+  --bg: #cfd1d3;
+  --bg-2: #c2c5c8;
+  --paper: #f6f4ef;
+  --ink: #121212;
+  --ink-2: #3a3a3a;
+  --muted: #5f5f5f;
+  --faint-ink: #6e6e6e;
+  --line: #b9bcbf;
+  --accent: #ff4f00;
+  --accent-ink: #c83a00;
+  --accent-soft: rgba(255, 79, 0, 0.12);
+  --on-accent: #121212;
+  --selection: rgba(255, 79, 0, 0.18);
+  --code-bg: #eceae5;
+  --code-ink: #3a3a3a;
+  --backdrop: rgba(207, 209, 211, 0.55);
   --btn-hover: #000;
-  --shadow-rgb: 40 34 24;
+  --shadow-rgb: 30 34 38;
 
   --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
-  --serif: 'Source Serif 4 Variable', 'Iowan Old Style', Georgia, serif;
+  --serif: 'Newsreader Variable', 'Iowan Old Style', Georgia, serif;
+  --display: 'Instrument Serif', var(--serif);
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
 
   --ease: cubic-bezier(0.2, 0.7, 0.1, 1);
@@ -37,20 +40,22 @@
 /* Dark theme for the screen only; print always uses the light paper. */
 @media screen {
   :root[data-theme='dark'] {
-    --bg: #1a1917;
-    --bg-2: #262420;
-    --paper: #252320;
-    --ink: #ebe6dc;
-    --ink-2: #c3bdb1;
-    --muted: #9c958a;
-    --faint-ink: #8b857b;
-    --line: #36332e;
-    --accent: #e07256;
-    --accent-soft: rgba(224, 114, 86, 0.14);
-    --selection: rgba(224, 114, 86, 0.28);
-    --code-bg: #2a2824;
-    --code-ink: #d9c2a5;
-    --backdrop: rgba(18, 17, 15, 0.6);
+    --bg: #1b1c1e;
+    --bg-2: #242629;
+    --paper: #2a2c2f;
+    --ink: #ebe8e2;
+    --ink-2: #c4c1bb;
+    --muted: #9a9894;
+    --faint-ink: #8a8884;
+    --line: #3a3c40;
+    --accent: #ff6a1a;
+    --accent-ink: #ff8a4c;
+    --accent-soft: rgba(255, 106, 26, 0.16);
+    --on-accent: #121212;
+    --selection: rgba(255, 106, 26, 0.3);
+    --code-bg: #232528;
+    --code-ink: #d6d3cd;
+    --backdrop: rgba(20, 21, 23, 0.6);
     --btn-hover: #fff;
     --shadow-rgb: 0 0 0;
     color-scheme: dark;
@@ -114,10 +119,27 @@ kbd {
 
 /* ——— App frame ——— */
 
+/* The stage fills the full window and the top bar floats over it, so documents scroll to the top edge. */
 .app {
+  --topbar-h: 48px;
+  --pane-head-h: 44px;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
+}
+
+.app > .topbar,
+.app > .stage {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+/* Frosted chrome: the paper shows through when it scrolls under the bars. */
+.topbar,
+.pane-head {
+  background: color-mix(in srgb, var(--bg) 30%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  backdrop-filter: blur(20px) saturate(1.2);
 }
 
 .chrome {
@@ -131,17 +153,14 @@ kbd {
 }
 
 .app[data-focus='true'] .topbar,
-.app[data-focus='true'] .pane-head,
-.app[data-focus='true'] .pane .format-toolbar {
+.app[data-focus='true'] .pane-head {
   opacity: 0;
 }
 
 .app[data-focus='true'] .topbar:hover,
 .app[data-focus='true'] .topbar:has(:focus-visible),
 .app[data-focus='true'] .pane-head:hover,
-.app[data-focus='true'] .pane-head:has(:focus-visible),
-.app[data-focus='true'] .format-toolbar:hover,
-.app[data-focus='true'] .format-toolbar:has(:focus-visible) {
+.app[data-focus='true'] .pane-head:has(:focus-visible) {
   opacity: 1;
 }
 
@@ -155,7 +174,8 @@ kbd {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  min-height: 48px;
+  align-self: start;
+  min-height: var(--topbar-h);
   padding: 6px 12px;
   position: relative;
   z-index: 10;
@@ -326,6 +346,7 @@ kbd {
 }
 
 .desk-layer {
+  top: var(--topbar-h);
   z-index: 5;
   background: var(--bg);
 }
@@ -411,7 +432,7 @@ kbd {
 }
 
 .lock-btn[data-on='true'] {
-  color: var(--accent);
+  color: var(--accent-ink);
   background: var(--accent-soft);
 }
 
@@ -526,7 +547,9 @@ kbd {
   background: var(--bg);
 }
 
+/* A pane in the top row starts under the top bar. */
 .pane {
+  --pane-top: 0px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -535,13 +558,25 @@ kbd {
   background: var(--bg);
 }
 
+.pane[data-top-row='true'] {
+  --pane-top: var(--topbar-h);
+}
+
+/* The problems banner sits under the top bar, so the panes below it need no extra space. */
+.workspace-region:has(> .document-problems) .pane {
+  --pane-top: 0px;
+}
+
 .pane-head {
-  position: relative;
+  position: absolute;
+  top: var(--pane-top);
+  left: 0;
+  right: 0;
+  z-index: 4;
   display: flex;
-  flex: none;
   align-items: center;
   gap: 10px;
-  min-height: 44px;
+  min-height: var(--pane-head-h);
   padding: 0 10px 0 18px;
   transition: opacity 0.6s var(--ease);
 }
@@ -639,7 +674,7 @@ kbd {
 }
 
 .save[data-status='error'] .save-label {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .pane-alert {
@@ -647,12 +682,16 @@ kbd {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 14px;
-  margin: 0 16px 8px;
+  position: absolute;
+  top: calc(var(--pane-top) + var(--pane-head-h));
+  left: 16px;
+  right: 16px;
+  z-index: 4;
   padding: 8px 12px;
   overflow: hidden;
   border-radius: 8px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 12px;
 }
 
@@ -671,13 +710,14 @@ kbd {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 10px 28px 40vh;
+  padding: calc(var(--pane-top) + var(--pane-head-h) + 10px) 28px 40vh;
+  scroll-padding-top: calc(var(--pane-top) + var(--pane-head-h) + 10px);
   scrollbar-width: thin;
   scrollbar-color: var(--faint-ink) transparent;
 }
 
 .workspace[data-layout='single'] .pane-scroll {
-  padding-top: 20px;
+  padding-top: calc(var(--pane-top) + var(--pane-head-h) + 20px);
 }
 
 .pane-empty {
@@ -757,7 +797,15 @@ kbd {
   line-height: 1.62;
   color: var(--ink);
   font-optical-sizing: auto;
+  font-variant-numeric: oldstyle-nums;
   overflow-wrap: break-word;
+}
+
+/* Light text on a dark page looks heavier, so the body text is a little lighter there. */
+@media screen {
+  :root[data-theme='dark'] .md-body {
+    font-weight: 380;
+  }
 }
 
 .md-body .ProseMirror {
@@ -778,17 +826,23 @@ kbd {
   font-weight: 560;
   line-height: 1.22;
   letter-spacing: -0.012em;
+  font-variant-numeric: lining-nums;
+}
+
+/* Instrument Serif has one weight and is made for large sizes, so only h1 and h2 use it. */
+.md-body :is(h1, h2) {
+  font-family: var(--display);
+  font-weight: 400;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
 }
 
 .md-body h1 {
-  font-size: 2.05em;
-  font-weight: 480;
-  letter-spacing: -0.02em;
+  font-size: 2.35em;
 }
 
 .md-body h2 {
-  font-size: 1.48em;
-  font-weight: 500;
+  font-size: 1.6em;
 }
 
 .md-body h3 {
@@ -953,6 +1007,7 @@ kbd {
   margin: 1.1em 0;
   border-collapse: collapse;
   font-size: 0.92em;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 .md-body :is(th, td) {
@@ -1027,7 +1082,7 @@ kbd {
 
 .desk-title {
   margin: 0;
-  font: 420 30px/1.1 var(--serif);
+  font: 400 32px/1.1 var(--display);
   letter-spacing: -0.02em;
   white-space: nowrap;
   overflow: hidden;
@@ -1042,7 +1097,7 @@ kbd {
 }
 
 .desk-selected {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .desk-tools {
@@ -1182,8 +1237,8 @@ kbd {
   height: 18px;
   border-radius: 50%;
   background: var(--accent);
-  color: var(--paper);
-  box-shadow: 0 2px 6px -2px rgba(181, 69, 46, 0.6);
+  color: var(--on-accent);
+  box-shadow: 0 2px 6px -2px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 .card[data-selected='true'] .thumb {
@@ -1282,7 +1337,7 @@ kbd {
 }
 
 .unstack-btn:hover {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 /* ——— Palette and sheets ——— */
@@ -1358,7 +1413,7 @@ kbd {
 }
 
 .palette-create em {
-  color: var(--accent);
+  color: var(--accent-ink);
   font-style: normal;
 }
 
@@ -1455,7 +1510,7 @@ kbd {
   width: 238px;
   min-width: 0;
   min-height: 0;
-  padding: 18px 10px 14px;
+  padding: calc(var(--topbar-h) + 18px) 10px 14px;
   border-right: 1px solid var(--line);
   background: var(--bg);
 }
@@ -1566,6 +1621,7 @@ kbd {
 .documents-shelf h3 { margin: 0 10px 5px; color: var(--ink-2); font-size: 12px; font-weight: 500; }
 
 .document-problems {
+  margin-top: var(--topbar-h);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1629,13 +1685,13 @@ kbd {
 
 .dialog-heading h2 {
   margin: 0;
-  font: 500 23px/1.2 var(--serif);
+  font: 400 25px/1.2 var(--display);
 }
 
 .dialog-actions { justify-content: flex-end; margin-top: 20px; }
 .new-document-dialog .field-label { margin-left: 0; }
 .field-hint { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; }
-.field-error { color: var(--accent); font-size: 13px; }
+.field-error { color: var(--accent-ink); font-size: 13px; }
 .stack-members { max-height: 48vh; margin-top: 16px; overflow: auto; }
 .stack-member { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .stack-member strong,
@@ -1644,49 +1700,134 @@ kbd {
 .stack-member small { color: var(--muted); }
 .stack-member-actions { display: flex; align-items: center; gap: 4px; }
 
-.rich-editor-wrap { position: relative; }
-.format-toolbar {
+/* ——— Formatting tools in the pane header ——— */
+
+.format-bar {
+  position: relative;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 2px;
-  margin: -42px 0 14px;
-  min-height: 28px;
+  min-width: 0;
   color: var(--muted);
   font: 12px var(--sans);
-  opacity: 0.35;
-  transition: opacity 0.3s var(--ease);
 }
 
-.pane:hover .format-toolbar,
-.format-toolbar:focus-within { opacity: 1; }
-
-.format-toolbar button,
-.format-toolbar input {
-  min-height: 28px;
-  padding: 3px 8px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
+.fb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
 }
 
-.format-toolbar .format-btn {
+.fb-bar + .fb-bar {
+  margin-left: 4px;
+  padding-left: 5px;
+  border-left: 1px solid var(--line);
+}
+
+.format-bar .format-btn {
   display: inline-grid;
   place-items: center;
   width: 28px;
+  height: 28px;
   padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
 }
 
-.format-toolbar input { border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
-.format-toolbar button { cursor: pointer; }
-.format-toolbar button:hover { background: var(--bg-2); color: var(--ink); }
-.selection-format-actions { padding-left: 6px; margin-left: 4px; border-left: 1px solid var(--line); }
-.format-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
-.selection-format-actions,
-.link-input-group { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
-.link-input-group input { max-width: 180px; }
+.format-bar .format-btn:hover {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+
+.format-bar .format-btn[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.format-bar .format-btn[aria-disabled='true']:hover {
+  background: none;
+  color: inherit;
+}
+
+.format-bar .format-btn[aria-expanded='true'] {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+
+/* The menu holds the groups that do not fit in the bar. */
+.fb-more {
+  position: relative;
+  display: none;
+}
+
+.fb-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: var(--shadow-lift);
+}
+
+.fb-menu .fb-group {
+  flex-wrap: nowrap;
+}
+
+.fb-menu .fb-group + .fb-group {
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.fb-link {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: var(--shadow-lift);
+}
+
+.fb-link input {
+  width: 220px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.fb-menu .fb-blocks,
+.fb-menu .fb-inline,
+.fb-menu .fb-marks {
+  display: none;
+}
+
+@container (max-width: 1000px) {
+  .fb-bar.fb-marks { display: none; }
+  .fb-more { display: inline-block; }
+  .fb-menu .fb-marks { display: inline-flex; }
+}
+
+@container (max-width: 720px) {
+  .fb-bar.fb-blocks,
+  .fb-bar.fb-inline { display: none; }
+  .fb-menu .fb-blocks,
+  .fb-menu .fb-inline { display: inline-flex; }
+}
+
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 button:focus-visible,
@@ -1761,7 +1902,6 @@ select:focus-visible {
   .pane-alert,
   .documents-nav,
   .document-problems,
-  .format-toolbar,
   .desk-layer,
   .toast,
   .pane:not([data-focused='true']) {
@@ -1798,4 +1938,425 @@ select:focus-visible {
   .folio {
     display: none;
   }
+}
+
+/* ——— Notes ———
+   Notes are pencil marks: a thin accent underline in the text, and small italic notes beside the sheet. */
+
+.paper-frame {
+  position: relative;
+}
+
+.md-body .note-anchor {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.22em;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background-color 0.2s var(--ease), text-decoration-color 0.2s var(--ease);
+}
+
+.md-body .note-anchor.is-active {
+  background: var(--accent-soft);
+  text-decoration-color: var(--accent);
+}
+
+.note-margin {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(100% + 22px);
+  width: 232px;
+  pointer-events: none;
+}
+
+.note-margin[data-compact='true'] {
+  left: auto;
+  right: 0;
+  width: 100%;
+}
+
+.note-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 1px 0 2px 12px;
+  border-left: 1px solid var(--line);
+  color: var(--ink-2);
+  font: italic 400 13.5px/1.45 var(--serif);
+  pointer-events: auto;
+  transition: top 0.28s var(--ease), border-color 0.2s var(--ease), color 0.2s var(--ease);
+}
+
+.note-card[data-active='true'] {
+  border-left-color: var(--accent);
+  color: var(--ink);
+}
+
+/* A short leader line from the active note to the edge of the sheet. */
+.note-margin:not([data-compact='true']) .note-card[data-active='true']::before {
+  content: '';
+  position: absolute;
+  top: 0.75em;
+  left: -22px;
+  width: 21px;
+  border-top: 1px solid var(--leader, var(--accent));
+}
+
+.note-margin[data-compact='true'] .note-card {
+  left: auto;
+  right: 2.4cqw;
+  width: min(260px, 80%);
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: var(--shadow-lift);
+  z-index: 2;
+}
+
+.note-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-input {
+  display: block;
+  width: 100%;
+  min-height: 2.9em;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  caret-color: var(--accent);
+}
+
+.note-input::placeholder {
+  color: var(--faint-ink);
+}
+
+.note-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 3px;
+  color: var(--faint-ink);
+  font: 11px/1.4 var(--sans);
+}
+
+.note-actions {
+  display: inline-flex;
+  gap: 10px;
+  opacity: 0;
+  transition: opacity 0.2s var(--ease);
+}
+
+.note-card:hover .note-actions,
+.note-card:focus-within .note-actions,
+.note-card[data-active='true'] .note-actions {
+  opacity: 1;
+}
+
+.note-actions button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.note-actions button:hover,
+.note-actions button:focus-visible {
+  color: var(--accent-ink);
+}
+
+/* In a narrow pane each note is a dot in the right margin of the sheet. */
+.note-dot {
+  position: absolute;
+  right: calc(4.762cqw - 10px);
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.note-dot::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.75;
+  transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
+}
+
+.note-dot:hover::after,
+.note-dot:focus-visible::after {
+  opacity: 1;
+  transform: scale(1.3);
+}
+
+.note-shelf {
+  width: min(calc(210mm * var(--paper-zoom, 1)), 100%);
+  margin: 28px auto 0;
+  color: var(--muted);
+  font: 13px/1.5 var(--sans);
+}
+
+.note-shelf h3,
+.note-shelf summary {
+  margin: 18px 0 8px;
+  color: var(--faint-ink);
+  font: 600 10.5px/1.4 var(--sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.note-shelf summary {
+  cursor: pointer;
+}
+
+.shelf-note {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.shelf-note blockquote {
+  margin: 0;
+  color: var(--muted);
+  font: italic 14px/1.45 var(--serif);
+}
+
+.shelf-note blockquote::before { content: '“'; }
+.shelf-note blockquote::after { content: '”'; }
+
+.shelf-note p {
+  margin: 0;
+  color: var(--ink-2);
+  font: 14px/1.5 var(--serif);
+  white-space: pre-wrap;
+}
+
+.shelf-note .note-actions {
+  opacity: 1;
+  font-size: 11.5px;
+}
+
+.note-shelf-hint,
+.note-shelf-error {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.note-shelf-error {
+  color: var(--accent-ink);
+}
+
+.notes-btn {
+  position: relative;
+}
+
+.notes-btn[aria-pressed='false'] {
+  color: var(--faint-ink);
+}
+
+.notes-count {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: 600 9px/14px var(--sans);
+  text-align: center;
+  pointer-events: none;
+}
+
+.notes-btn[aria-pressed='false'] .notes-count {
+  background: var(--bg-2);
+  color: var(--muted);
+}
+
+.app[data-focus='true'] .note-margin {
+  opacity: 0.35;
+  transition: opacity 0.4s var(--ease);
+}
+
+.app[data-focus='true'] .note-margin:hover,
+.app[data-focus='true'] .note-margin:focus-within {
+  opacity: 1;
+}
+
+@media print {
+  .note-margin,
+  .note-shelf {
+    display: none;
+  }
+
+  .md-body .note-anchor,
+  .md-body .mark-highlight,
+  .md-body .mark-cut {
+    background: none;
+    color: inherit;
+    text-decoration: none;
+  }
+}
+
+/* ——— Highlights and cuts ———
+   A highlight fills the lower part of the text, over most of the lowercase letters. A cut is a thin line through dim text. */
+
+:root {
+  --hl-yellow: rgba(255, 204, 0, 0.42);
+  --hl-green: rgba(52, 199, 89, 0.3);
+  --hl-blue: rgba(10, 132, 255, 0.22);
+  --hl-pink: rgba(255, 45, 146, 0.22);
+  --hl-yellow-solid: #e0b000;
+  --hl-green-solid: #2ea84c;
+  --hl-blue-solid: #1a7fe6;
+  --hl-pink-solid: #e0338a;
+}
+
+@media screen {
+  :root[data-theme='dark'] {
+    --hl-yellow: rgba(255, 204, 0, 0.3);
+    --hl-green: rgba(52, 199, 89, 0.28);
+    --hl-blue: rgba(64, 156, 255, 0.32);
+    --hl-pink: rgba(255, 70, 160, 0.3);
+    --hl-yellow-solid: #f0c419;
+    --hl-green-solid: #45c465;
+    --hl-blue-solid: #4ea1ff;
+    --hl-pink-solid: #ff5cae;
+  }
+}
+
+.hl-yellow { --hl: var(--hl-yellow); --hl-solid: var(--hl-yellow-solid); }
+.hl-green { --hl: var(--hl-green); --hl-solid: var(--hl-green-solid); }
+.hl-blue { --hl: var(--hl-blue); --hl-solid: var(--hl-blue-solid); }
+.hl-pink { --hl: var(--hl-pink); --hl-solid: var(--hl-pink-solid); }
+
+.md-body .mark-highlight {
+  background: linear-gradient(transparent 32%, var(--hl) 32%);
+  border-radius: 1px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  cursor: pointer;
+  transition: background 0.2s var(--ease);
+}
+
+.md-body .mark-highlight.is-active {
+  background: linear-gradient(var(--hl), var(--hl));
+}
+
+.md-body .mark-cut {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--accent-ink);
+  text-decoration-thickness: 1.5px;
+  cursor: pointer;
+  transition: background-color 0.2s var(--ease);
+}
+
+.md-body .mark-cut.is-active {
+  background: var(--accent-soft);
+}
+
+.hl-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--hl-solid);
+  vertical-align: middle;
+}
+
+.hl-colors {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.2s var(--ease);
+}
+
+.note-card:hover .hl-colors,
+.note-card:focus-within .hl-colors,
+.note-card[data-active='true'] .hl-colors {
+  opacity: 1;
+}
+
+.hl-colors .hl-swatch {
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  border: 0;
+  opacity: 0.5;
+  cursor: pointer;
+  transition: opacity 0.2s var(--ease);
+}
+
+.hl-colors .hl-swatch:hover,
+.hl-colors .hl-swatch[aria-pressed='true'] {
+  opacity: 1;
+}
+
+.hl-colors .hl-swatch[aria-pressed='true'] {
+  box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 2.5px var(--hl-solid);
+}
+
+.note-card.note-highlight {
+  --leader: var(--hl-solid);
+  border-left-color: var(--hl-solid);
+}
+
+.note-card.note-highlight .note-meta {
+  align-items: center;
+}
+
+.note-card.note-cut {
+  --leader: var(--accent-ink);
+  border-left-style: dashed;
+}
+
+.note-cut .cut-label {
+  color: var(--muted);
+}
+
+.note-cut .note-actions {
+  opacity: 1;
+}
+
+.note-dot.is-highlight::after {
+  background: var(--hl-solid);
+}
+
+.note-dot.is-cut::after {
+  inset: 9px 4px;
+  border-radius: 1px;
+  background: var(--accent-ink);
+}
+
+.note-shelf-cuts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.shelf-note[data-kind='cut'] blockquote {
+  text-decoration: line-through;
 }

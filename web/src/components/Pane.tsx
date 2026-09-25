@@ -1,18 +1,26 @@
-// ABOUTME: One workspace pane: a header, an A4 paper, and a rich or source editor for one document.
+// ABOUTME: One workspace pane: a header, an A4 paper with margin notes, and a rich or source editor for one document.
 // ABOUTME: It keeps its scroll position when the mode changes and takes part in scroll lock.
 
 import { AnimatePresence, motion } from 'motion/react'
-import { type CSSProperties, lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { type SaveStatus, useDocument } from '../hooks/useDocument'
+import { type CSSProperties, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type SaveStatus, useDocument, useNotes } from '../hooks/useDocument'
+import { kindOf, type Note, type TextQuote, wordsAfterCuts } from '../lib/annotations'
 import type { ScrollSync } from '../lib/scrollSync'
 import { dirOf, titleFromPath } from '../lib/text'
 import type { Mode, PaneState } from '../lib/workspace'
-import { CloseIcon, RichIcon, SourceIcon, SplitIcon } from './icons'
+import { FormatBar } from './FormatBar'
+import { CloseIcon, NotesIcon, RichIcon, SourceIcon, SplitIcon } from './icons'
+import { NoteMargin } from './NoteMargin'
+import type { AnchorReport } from './notesPlugin'
+import { NoteShelf } from './NoteShelf'
 import { Paper } from './Paper'
+import type { Mark, RichHandle } from './RichEditor'
 
 type Props = {
   pane: PaneState
   focused: boolean
+  /** The pane is in the top row of the layout, so it starts under the top bar. */
+  topRow: boolean
   focusSignal: number
   sync: ScrollSync
   style: CSSProperties
@@ -21,7 +29,13 @@ type Props = {
   onClose: () => void
   onPick: () => void
   onSplit: () => void
+  showNotes: boolean
+  onShowNotes: (show: boolean) => void
 }
+
+const NO_NOTES: Note[] = []
+/** Fresh quotes wait this long after the last edit, so typing does not rewrite the notes file each time. */
+const REQUOTE_DELAY_MS = 1200
 
 // Each editor loads on first use, so the app starts with neither editor in the first download.
 const RichEditor = lazy(() => import('./RichEditor').then((m) => ({ default: m.RichEditor })))
@@ -35,8 +49,91 @@ const STATUS_LABEL: Partial<Record<SaveStatus, string>> = {
   conflict: 'Changed on disk',
 }
 
-export function Pane({ pane, focused, focusSignal, sync, style, onFocus, onMode, onClose, onPick, onSplit }: Props) {
+export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus, onMode, onClose, onPick, onSplit, showNotes, onShowNotes }: Props) {
   const { doc, status, words, edit, reload, keepMine, retry } = useDocument(pane.path)
+  const notes = useNotes(pane.path)
+  const [active, setActive] = useState<string | null>(null)
+  const [hover, setHover] = useState<string | null>(null)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [anchors, setAnchors] = useState<{ attached: string[]; detached: string[] }>({ attached: [], detached: [] })
+  const richRef = useRef<RichHandle | null>(null)
+  const [selected, setSelected] = useState(false)
+  const notesOn = showNotes && pane.mode === 'rich' && notes.loaded
+  const editorNotes = notesOn ? notes.notes : NO_NOTES
+  const byId = useMemo(() => new Map(notes.notes.map((n) => [n.id, n])), [notes.notes])
+  const pick = (ids: string[]) => ids.map((id) => byId.get(id)).filter((n): n is Note => Boolean(n && !n.resolved))
+  const attachedNotes = pick(anchors.attached)
+  // A highlight shows in the margin only when it has a note, or while it is active.
+  const marginNotes = attachedNotes.filter((n) => kindOf(n) !== 'highlight' || n.body || n.id === active || n.id === editing)
+  const cuts = notesOn ? attachedNotes.filter((n) => kindOf(n) === 'cut') : NO_NOTES
+  const detachedNotes = pick(anchors.detached)
+  const resolvedNotes = notes.notes.filter((n) => n.resolved)
+  // Notes and cuts ask for a decision; highlights do not, so they are not in the count.
+  const openCount = notes.notes.filter((n) => !n.resolved && kindOf(n) !== 'highlight').length
+
+  useEffect(() => {
+    setActive(null)
+    setEditing(null)
+    setAnchors({ attached: [], detached: [] })
+  }, [pane.path])
+
+  const requoteRef = useRef(notes.requote)
+  requoteRef.current = notes.requote
+  const quoteQueue = useRef<{ quotes: Map<string, TextQuote>; timer?: ReturnType<typeof setTimeout> }>({ quotes: new Map() })
+  useEffect(() => () => clearTimeout(quoteQueue.current.timer), [])
+  const onAnchors = useCallback((report: AnchorReport) => {
+    setAnchors((prev) =>
+      prev.attached.join(' ') === report.attached.join(' ') && prev.detached.join(' ') === report.detached.join(' ')
+        ? prev
+        : { attached: report.attached, detached: report.detached },
+    )
+    if (report.quotes.size === 0) return
+    const queue = quoteQueue.current
+    for (const [id, quote] of report.quotes) queue.quotes.set(id, quote)
+    clearTimeout(queue.timer)
+    queue.timer = setTimeout(() => {
+      const quotes = queue.quotes
+      queue.quotes = new Map()
+      requoteRef.current(quotes)
+    }, REQUOTE_DELAY_MS)
+  }, [])
+
+  const annotate = notes.loaded
+    ? (quote: TextQuote, mark: Mark) => {
+        const note: Note = { id: crypto.randomUUID(), quote, body: '', created: Date.now(), resolved: false }
+        if (mark.kind !== 'comment') note.kind = mark.kind
+        if (mark.kind === 'highlight') note.color = mark.color
+        notes.add(note)
+        if (mark.kind === 'comment') {
+          setActive(note.id)
+          setEditing(note.id)
+        }
+        if (!showNotes) onShowNotes(true)
+      }
+    : null
+  const acceptCuts = (ids: string[]) => {
+    if (!richRef.current?.acceptCuts(ids)) return
+    for (const id of ids) notes.remove(id)
+    setActive(null)
+  }
+  const editNote = (id: string | null) => {
+    setEditing(id)
+    if (id) setActive(id)
+  }
+  const resolveNote = (id: string) => {
+    notes.update(id, { resolved: true })
+    setActive(null)
+  }
+  const deleteNote = (id: string) => {
+    notes.remove(id)
+    setActive((current) => (current === id ? null : current))
+  }
+  const attachNote = (id: string) => {
+    const quote = richRef.current?.selectionQuote()
+    if (!quote) return false
+    notes.update(id, { quote })
+    return true
+  }
   const sectionRef = useRef<HTMLElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [pages, setPages] = useState(1)
@@ -89,6 +186,7 @@ export function Pane({ pane, focused, focusSignal, sync, style, onFocus, onMode,
       animate={{ opacity: 1 }}
       className="pane"
       data-focused={focused}
+      data-top-row={topRow}
       style={style}
       onMouseDownCapture={onFocus}
       onFocusCapture={onFocus}
@@ -101,11 +199,20 @@ export function Pane({ pane, focused, focusSignal, sync, style, onFocus, onMode,
           {dir && <span className="pane-title-dir">{dir}</span>}
         </button>
         <SaveDot status={status} />
+        {doc && pane.mode === 'rich' && <FormatBar editor={richRef} selected={selected} canMark={Boolean(annotate)} />}
         <span className="pane-tools chrome">
           {doc && (
             <span className="pane-stats">
-              {words.toLocaleString()} words · {pages} {pages === 1 ? 'page' : 'pages'}
+              {words.toLocaleString()} words{cuts.length > 0 && ` · ${wordsAfterCuts(words, cuts).toLocaleString()} after cuts`} · {pages} {pages === 1 ? 'page' : 'pages'}
             </span>
+          )}
+          {pane.path && (
+            <button className="icon-btn icon-btn-sm notes-btn" onClick={() => onShowNotes(!showNotes)} aria-pressed={showNotes}
+              data-tip={pane.mode === 'rich' ? (showNotes ? 'Hide notes ⌥M' : 'Show notes ⌥M') : 'Notes show in formatted text'}
+              aria-label={`${showNotes ? 'Hide' : 'Show'} notes${openCount ? `, ${openCount} open` : ''}`}>
+              <NotesIcon />
+              {openCount > 0 && <span className="notes-count" aria-hidden>{openCount}</span>}
+            </button>
           )}
           {pane.path && (
             <button className="icon-btn icon-btn-sm" onClick={onSplit} data-tip="Split: same document beside"
@@ -152,15 +259,29 @@ export function Pane({ pane, focused, focusSignal, sync, style, onFocus, onMode,
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
               transition={{ duration: 0.32, ease: [0.2, 0.7, 0.1, 1] }}
             >
-              <Paper onPages={setPages}>
+              <Paper
+                onPages={setPages}
+                aside={notesOn && marginNotes.length > 0 ? (
+                  <NoteMargin notes={marginNotes} active={active} editing={editing} onActivate={setActive} onHover={setHover}
+                    onEdit={editNote} onChange={(id, body) => notes.update(id, { body })} onResolve={resolveNote} onDelete={deleteNote}
+                    onColor={(id, color) => notes.update(id, { color })} onAcceptCut={(id) => acceptCuts([id])} />
+                ) : null}
+              >
                 <Suspense fallback={null}>
                   {pane.mode === 'rich' ? (
-                    <RichEditor docPath={doc.path} initial={editorSeed.current} content={doc.content} onChange={edit} onReady={onReady} />
+                    <RichEditor docPath={doc.path} initial={editorSeed.current} content={doc.content} onChange={edit} onReady={onReady}
+                      notes={editorNotes} highlight={hover ?? active} onAnnotate={annotate} onAnchors={onAnchors}
+                      onActivateNote={setActive} handleRef={richRef} onSelection={setSelected} />
                   ) : (
                     <SourceEditor initial={editorSeed.current} content={doc.content} onChange={edit} onReady={onReady} />
                   )}
                 </Suspense>
               </Paper>
+              {notesOn && (
+                <NoteShelf detached={detachedNotes} resolved={resolvedNotes} cuts={cuts.length} status={notes.status} onAttach={attachNote}
+                  onAcceptAllCuts={() => acceptCuts(cuts.map((n) => n.id))}
+                  onReopen={(id) => notes.update(id, { resolved: false })} onDelete={deleteNote} onRetry={() => void notes.retry()} />
+              )}
             </motion.div>
           ) : status === 'error' ? (
             <div className="pane-empty">

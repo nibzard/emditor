@@ -72,6 +72,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
   const [showDocuments, setShowDocuments] = useStoredState(`emditor.documents${window.matchMedia('(max-width: 580px)').matches ? '.mobile' : ''}:${root}`, !window.matchMedia('(max-width: 580px)').matches)
   const [focusMode, setFocusMode] = useState(false)
   const [zoom, setZoom] = useStoredState(`emditor.zoom:${root}`, 1)
+  const [showNotes, setShowNotes] = useStoredState('emditor.notes', true)
   const { choice: themeChoice, setChoice: setThemeChoice } = useTheme()
   const [palette, setPalette] = useState<{ target: OpenTarget; title: string } | null>(null)
   const [newDialog, setNewDialog] = useState(false)
@@ -211,6 +212,9 @@ function Main({ initialListing }: { initialListing: Listing }) {
         } else if (code === 'KeyL') {
           e.preventDefault()
           dispatch({ type: 'lock' })
+        } else if (code === 'KeyM' && view === 'work') {
+          e.preventDefault()
+          setShowNotes((current) => !current)
         } else if (code === 'KeyF' && view === 'work') {
           e.preventDefault()
           setFocusMode((current) => !current)
@@ -251,7 +255,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
     // Capture phase, so that the editors do not take these keys first.
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [palette, newDialog, shortcuts, focusMode, view, work.focus, openPalette, openNew, switchView, setZoom, setThemeChoice])
+  }, [palette, newDialog, shortcuts, focusMode, view, work.focus, openPalette, openNew, switchView, setZoom, setThemeChoice, setShowNotes])
 
   const hasDocs = work.panes.some((p) => p.path)
 
@@ -315,7 +319,8 @@ function Main({ initialListing }: { initialListing: Listing }) {
               <span>{problems.length === 1 ? `${titleFromPath(problems[0].path)} needs attention.` : `${problems.length} documents need attention.`} Your draft is kept here.</span>
               <button className="text-btn" onClick={() => openDoc(problems[0].path, 'slot')}>Open draft</button>
             </div>}
-            <Workspace work={work} dispatch={dispatch} focusSignal={focusSignal} onPick={(i) => openPalette(i)} onSplit={(path) => openDoc(path, 'new')} />
+            <Workspace work={work} dispatch={dispatch} focusSignal={focusSignal} onPick={(i) => openPalette(i)} onSplit={(path) => openDoc(path, 'new')}
+              showNotes={showNotes} onShowNotes={setShowNotes} />
           </div>
         </div>
         <AnimatePresence>

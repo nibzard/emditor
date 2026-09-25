@@ -213,3 +213,90 @@ async fn refuses_foreign_hosts_origins_and_cross_site_requests() {
         .unwrap();
     assert_eq!(app.clone().oneshot(req).await.unwrap().status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn notes_of_a_document_without_notes_are_empty() {
+    let (dir, app) = setup();
+    let (status, body) = send(&app, get("/api/notes?path=alpha.md")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["content"], "");
+    assert_eq!(body["modified"], 0);
+    assert!(!dir.path().join(".emditor").exists());
+}
+
+#[tokio::test]
+async fn writes_notes_to_a_sidecar_file_and_reads_them_back() {
+    let (dir, app) = setup();
+    let notes = "{\"version\":1,\"notes\":[]}\n";
+    let (status, saved) = send(
+        &app,
+        json_request("PUT", "/api/notes?path=notes/beta.markdown", json!({ "content": notes, "baseModified": 0 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let sidecar = dir.path().join(".emditor/notes/notes/beta.markdown.json");
+    assert_eq!(std::fs::read_to_string(&sidecar).unwrap(), notes);
+
+    let (status, body) = send(&app, get("/api/notes?path=notes/beta.markdown")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["content"], notes);
+    assert_eq!(body["modified"], saved["modified"]);
+}
+
+#[tokio::test]
+async fn notes_write_with_an_old_base_is_a_conflict() {
+    let (dir, app) = setup();
+    let first = json!({ "content": "{\"version\":1,\"notes\":[]}", "baseModified": 0 });
+    let (status, _) = send(&app, json_request("PUT", "/api/notes?path=alpha.md", first.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // A second writer that still thinks there is no notes file.
+    let second = json!({ "content": "{\"version\":1,\"notes\":[{}]}", "baseModified": 0 });
+    let (status, body) = send(&app, json_request("PUT", "/api/notes?path=alpha.md", second)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["error"], "conflict");
+    let kept = std::fs::read_to_string(dir.path().join(".emditor/notes/alpha.md.json")).unwrap();
+    assert_eq!(kept, "{\"version\":1,\"notes\":[]}");
+}
+
+#[tokio::test]
+async fn notes_must_be_a_json_object() {
+    let (dir, app) = setup();
+    for content in ["not json", "[1,2]", ""] {
+        let (status, body) = send(
+            &app,
+            json_request("PUT", "/api/notes?path=alpha.md", json!({ "content": content, "baseModified": 0 })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "content {content:?}");
+        assert_eq!(body["error"], "bad-notes");
+    }
+    assert!(!dir.path().join(".emditor").exists());
+}
+
+#[tokio::test]
+async fn notes_need_an_existing_markdown_document() {
+    let (_dir, app) = setup();
+    let (status, _) = send(&app, get("/api/notes?path=nope.md")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    for path in ["readme.txt", "../x.md", "notes/../alpha.md"] {
+        let (status, _) = send(&app, get(&format!("/api/notes?path={path}"))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "path {path:?}");
+    }
+}
+
+#[tokio::test]
+async fn notes_do_not_follow_a_sidecar_folder_link_out_of_the_root() {
+    let (dir, app) = setup();
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join(".emditor")).unwrap();
+    let (status, _) = send(
+        &app,
+        json_request("PUT", "/api/notes?path=alpha.md", json!({ "content": "{}", "baseModified": 0 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!outside.path().join("notes").exists());
+    let (status, _) = send(&app, get("/api/notes?path=alpha.md")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

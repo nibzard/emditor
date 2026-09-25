@@ -14,9 +14,11 @@ type Props = {
   focusSignal: number
   onPick: (index: number) => void
   onSplit: (path: string) => void
+  showNotes: boolean
+  onShowNotes: (show: boolean) => void
 }
 
-export function Workspace({ work, dispatch, focusSignal, onPick, onSplit }: Props) {
+export function Workspace({ work, dispatch, focusSignal, onPick, onSplit, showNotes, onShowNotes }: Props) {
   const sync = useMemo(() => new ScrollSync(), [])
   useEffect(() => {
     sync.enabled = work.lock
@@ -41,6 +43,7 @@ export function Workspace({ work, dispatch, focusSignal, onPick, onSplit }: Prop
               key={pane.id}
               pane={pane}
               focused={i === work.focus}
+              topRow={cell.row === 0}
               focusSignal={focusSignal}
               sync={sync}
               style={{ gridColumn: `${cell.col + 1} / span ${cell.w}`, gridRow: `${cell.row + 1} / span ${cell.h}` }}
@@ -49,6 +52,8 @@ export function Workspace({ work, dispatch, focusSignal, onPick, onSplit }: Prop
               onClose={() => dispatch({ type: 'close', index: i })}
               onPick={() => onPick(i)}
               onSplit={() => pane.path && onSplit(pane.path)}
+              showNotes={showNotes}
+              onShowNotes={onShowNotes}
             />
           )
         })}

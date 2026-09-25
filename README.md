@@ -2,6 +2,8 @@
 
 A small local Markdown desk for macOS. One Rust binary starts a local server and opens the app in your browser.
 
+![emditor: two panes with margin notes and the keys table](docs/screenshot.png)
+
 - **Documents**: a visible, searchable list for moving between files. The most recently edited document opens when you start.
 - **Workspace**: write in rich text or Markdown source mode. Open another document beside the current one when you need to compare them, and choose an arrangement from **Arrange**.
 - **Paper desk**: see every Markdown file as an A4 thumbnail. Sort and stack files; open a stack to choose an individual document.

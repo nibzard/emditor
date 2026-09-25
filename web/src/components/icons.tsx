@@ -3,7 +3,7 @@
 
 import {
   ArrowLeft, Bold, Code, FilePlus, LayoutGrid, Heading1, Heading2, Italic, Keyboard, LayoutPanelLeft,
-  Columns2, Link, List, type LucideIcon, Maximize2, Minimize2, Minus, Monitor, Moon, Sun, ZoomIn, ZoomOut, PanelLeft, Pilcrow, Plus, Search, SquareSplitHorizontal,
+  Columns2, Link, List, type LucideIcon, Ellipsis, MessageSquare, MessageSquarePlus, Scissors, Maximize2, Minimize2, Minus, Monitor, Moon, Sun, ZoomIn, ZoomOut, PanelLeft, Pilcrow, Plus, Search, SquareSplitHorizontal,
   Type, X,
 } from 'lucide-react'
 import { motion } from 'motion/react'
@@ -59,17 +59,19 @@ export const BulletsIcon = lucide(List, 15)
 export const BoldIcon = lucide(Bold, 15)
 export const ItalicIcon = lucide(Italic, 15)
 export const LinkIcon = lucide(Link, 15)
+export const AddNoteIcon = lucide(MessageSquarePlus, 15)
+export const NotesIcon = lucide(MessageSquare)
+export const CutIcon = lucide(Scissors, 15)
+export const MoreIcon = lucide(Ellipsis, 15)
 
 export function LockIcon({ locked }: { locked: boolean }) {
   return (
     <Icon>
       <rect x="3.5" y="7.25" width="9" height="6.25" rx="1.5" />
       <motion.path
-        d="M5.5 7.25V5.5a2.5 2.5 0 0 1 5 0v1.75"
         initial={false}
-        animate={{ y: locked ? 0 : -1.6, x: locked ? 0 : 2.2, rotate: locked ? 0 : 14 }}
-        transition={{ type: 'spring', stiffness: 520, damping: 22 }}
-        style={{ originX: '10.5px', originY: '7.25px' }}
+        animate={{ d: locked ? 'M5.5 7.25V5.5a2.5 2.5 0 0 1 5 0v1.75' : 'M5.5 5.25V3.5a2.5 2.5 0 0 1 5 0v3.75' }}
+        transition={{ type: 'spring', stiffness: 520, damping: 26 }}
       />
     </Icon>
   )

@@ -1,21 +1,25 @@
-// ABOUTME: React access to the folder's document store and its global save lifecycle.
-// ABOUTME: The store outlives panes, so layout and editor changes never own the only draft.
+// ABOUTME: React access to the folder's document and notes stores and their global save lifecycle.
+// ABOUTME: The stores outlive panes, so layout and editor changes never own the only draft.
 
 import { createContext, type ReactNode, useContext, useEffect, useState, useSyncExternalStore } from 'react'
+import type { Note, TextQuote } from '../lib/annotations'
 import { DocumentStore } from './documentStore'
+import { NotesStore } from './notesStore'
 
 export type { SaveStatus } from './documentStore'
 
 const Context = createContext<DocumentStore | null>(null)
+const NotesContext = createContext<NotesStore | null>(null)
 
 export function DocumentProvider({ root, children }: { root: string; children: ReactNode }) {
   const [store] = useState(() => new DocumentStore(root))
+  const [notes] = useState(() => new NotesStore())
   useEffect(() => {
-    const onSave = () => void store.saveAll()
+    const onSave = () => { void store.saveAll(); void notes.saveAll() }
     const onHidden = () => { if (document.visibilityState === 'hidden') onSave() }
-    const onFocus = () => void store.refresh()
+    const onFocus = () => { void store.refresh(); void notes.refresh() }
     const onUnload = (event: BeforeUnloadEvent) => {
-      if (store.hasUnsettled()) event.preventDefault()
+      if (store.hasUnsettled() || notes.hasUnsettled()) event.preventDefault()
     }
     window.addEventListener('emditor:save-all', onSave)
     document.addEventListener('visibilitychange', onHidden)
@@ -27,8 +31,8 @@ export function DocumentProvider({ root, children }: { root: string; children: R
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('beforeunload', onUnload)
     }
-  }, [store])
-  return <Context.Provider value={store}>{children}</Context.Provider>
+  }, [store, notes])
+  return <Context.Provider value={store}><NotesContext.Provider value={notes}>{children}</NotesContext.Provider></Context.Provider>
 }
 
 export function useDocumentStore() {
@@ -60,5 +64,23 @@ export function useDocument(path: string | null) {
     reload: () => path ? store.reload(path) : Promise.resolve(),
     keepMine: () => path ? store.retry(path, true) : Promise.resolve(),
     retry: () => path ? store.retry(path) : Promise.resolve(),
+  }
+}
+
+export function useNotes(path: string | null) {
+  const store = useContext(NotesContext)
+  if (!store) throw new Error('DocumentProvider is missing')
+  const snapshot = useSyncExternalStore(
+    (listener) => store.subscribe(path, listener),
+    () => store.getSnapshot(path),
+    () => store.getSnapshot(path),
+  )
+  return {
+    ...snapshot,
+    add: (note: Note) => { if (path) store.add(path, note) },
+    update: (id: string, patch: Partial<Pick<Note, 'body' | 'resolved' | 'quote' | 'color'>>) => { if (path) store.update(path, id, patch) },
+    requote: (quotes: Map<string, TextQuote>) => { if (path) store.requote(path, quotes) },
+    remove: (id: string) => { if (path) store.remove(path, id) },
+    retry: () => (path ? store.save(path) : Promise.resolve()),
   }
 }

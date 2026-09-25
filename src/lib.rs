@@ -1,5 +1,5 @@
 // ABOUTME: Core of emditor. It builds the HTTP router that serves the embedded web app
-// ABOUTME: and the JSON API that lists, reads, creates, and writes Markdown files in one folder.
+// ABOUTME: and the JSON API that lists, reads, creates, and writes Markdown files and their notes in one folder.
 
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
@@ -23,6 +23,8 @@ const MAX_FILES: usize = 2000;
 const PREVIEW_BYTES: usize = 3000;
 /// Folders that the listing does not enter.
 const SKIPPED_DIRS: &[&str] = &["node_modules", "target"];
+/// Folder in the root that keeps the notes of each document in `<document path>.json`.
+const NOTES_DIR: &[&str] = &[".emditor", "notes"];
 
 #[derive(RustEmbed)]
 #[folder = "web/dist"]
@@ -42,6 +44,7 @@ pub fn app(root: PathBuf) -> Router {
     Router::new()
         .route("/api/files", get(list_files))
         .route("/api/file", get(read_file).put(write_file).post(create_file))
+        .route("/api/notes", get(read_notes).put(write_notes))
         .route("/files/{*path}", get(raw_file))
         .fallback(static_asset)
         .layer(middleware::from_fn(local_only))
@@ -51,6 +54,7 @@ pub fn app(root: PathBuf) -> Router {
 #[derive(Debug)]
 enum ApiError {
     BadPath,
+    BadNotes,
     NotFound,
     Conflict,
     Exists,
@@ -71,6 +75,7 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code) = match &self {
             ApiError::BadPath => (StatusCode::BAD_REQUEST, "bad-path".to_string()),
+            ApiError::BadNotes => (StatusCode::BAD_REQUEST, "bad-notes".to_string()),
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not-found".to_string()),
             ApiError::Conflict => (StatusCode::CONFLICT, "conflict".to_string()),
             ApiError::Exists => (StatusCode::CONFLICT, "exists".to_string()),
@@ -117,6 +122,21 @@ struct WriteBody {
 #[derive(Serialize)]
 struct Saved {
     modified: u64,
+}
+
+/// The notes file of one document. A document without notes has empty content and modified 0.
+#[derive(Serialize)]
+struct Notes {
+    content: String,
+    modified: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NotesBody {
+    content: String,
+    /// The modified time that the writer read, or 0 when it read no notes file.
+    base_modified: u64,
 }
 
 async fn list_files(State(state): State<AppState>) -> Result<Json<Listing>, ApiError> {
@@ -188,6 +208,60 @@ async fn create_file(
     Ok(Json(Doc {
         path: query.path,
         content: body.content,
+        modified: modified_ms(&meta),
+    }))
+}
+
+async fn read_notes(
+    State(state): State<AppState>,
+    Query(query): Query<PathQuery>,
+) -> Result<Json<Notes>, ApiError> {
+    let doc = resolve_markdown(&state.root, &query.path)?;
+    tokio::fs::metadata(&doc).await?;
+    let empty = Notes {
+        content: String::new(),
+        modified: 0,
+    };
+    let Some(full) = notes_path(&state.root, &query.path, false)? else {
+        return Ok(Json(empty));
+    };
+    match tokio::fs::read_to_string(&full).await {
+        Ok(content) => {
+            let meta = tokio::fs::metadata(&full).await?;
+            Ok(Json(Notes {
+                content,
+                modified: modified_ms(&meta),
+            }))
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(Json(empty)),
+        Err(err) => Err(err.into()),
+    }
+}
+
+async fn write_notes(
+    State(state): State<AppState>,
+    Query(query): Query<PathQuery>,
+    Json(body): Json<NotesBody>,
+) -> Result<Json<Saved>, ApiError> {
+    let doc = resolve_markdown(&state.root, &query.path)?;
+    tokio::fs::metadata(&doc).await?;
+    let is_object =
+        serde_json::from_str::<serde_json::Value>(&body.content).is_ok_and(|v| v.is_object());
+    if !is_object {
+        return Err(ApiError::BadNotes);
+    }
+    let full = notes_path(&state.root, &query.path, true)?.ok_or(ApiError::BadPath)?;
+    let current = match tokio::fs::metadata(&full).await {
+        Ok(meta) => modified_ms(&meta),
+        Err(err) if err.kind() == ErrorKind::NotFound => 0,
+        Err(err) => return Err(err.into()),
+    };
+    if current != body.base_modified {
+        return Err(ApiError::Conflict);
+    }
+    write_atomic(&full, &body.content).await?;
+    let meta = tokio::fs::metadata(&full).await?;
+    Ok(Json(Saved {
         modified: modified_ms(&meta),
     }))
 }
@@ -352,6 +426,38 @@ fn resolve(root: &Path, rel: &str) -> Result<PathBuf, ApiError> {
         return Err(ApiError::BadPath);
     }
     Ok(full)
+}
+
+/// Gives the notes file of a document, which must be a checked relative path. Each folder on the way
+/// must stay inside the root, also through symbolic links. With `create`, it makes missing folders;
+/// without it, a missing folder gives None.
+fn notes_path(root: &Path, rel: &str, create: bool) -> Result<Option<PathBuf>, ApiError> {
+    let rel_path = Path::new(rel);
+    let doc_dirs = rel_path
+        .parent()
+        .into_iter()
+        .flat_map(|p| p.components().map(|c| c.as_os_str()));
+    let mut dir = root.to_path_buf();
+    for part in NOTES_DIR.iter().map(std::ffi::OsStr::new).chain(doc_dirs) {
+        dir.push(part);
+        match dir.canonicalize() {
+            Ok(real) if real.starts_with(root) => {}
+            Ok(_) => return Err(ApiError::BadPath),
+            Err(_) if create => std::fs::create_dir(&dir)?,
+            Err(_) => return Ok(None),
+        }
+    }
+    let name = rel_path
+        .file_name()
+        .ok_or(ApiError::BadPath)?
+        .to_string_lossy();
+    let full = dir.join(format!("{name}.json"));
+    if let Ok(target) = full.canonicalize()
+        && !target.starts_with(root)
+    {
+        return Err(ApiError::BadPath);
+    }
+    Ok(Some(full))
 }
 
 async fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {

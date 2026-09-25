@@ -6,10 +6,10 @@ A local Markdown desk: a Rust binary (axum) that embeds a React app (web/dist, v
 
 ## Layouts
 
-- `src/lib.rs` — router, file API (`/api/files`, `/api/file`, `/files/*`), local-only guard. `src/main.rs` — CLI.
+- `src/lib.rs` — router, file API (`/api/files`, `/api/file`, `/files/*`), notes API (`/api/notes`, sidecar files in `.emditor/notes/<path>.json`), local-only guard. `src/main.rs` — CLI.
 - `tests/api.rs` — API integration tests against a temp folder.
-- `web/src/lib/` — pure logic with Vitest tests: `desk.ts` (sort/stack), `workspace.ts` (pane reducer, shelf), `layouts.ts`, `scrollSync.ts`, `text.ts`.
-- `web/src/hooks/documentStore.ts` — folder-scoped document data, per-path draft and save status, retry/conflict recovery, local draft backup. `useDocument.tsx` exposes it through context to panes.
+- `web/src/lib/` — pure logic with Vitest tests: `desk.ts` (sort/stack), `workspace.ts` (pane reducer, shelf), `layouts.ts`, `scrollSync.ts`, `text.ts`, `annotations.ts` (text-quote anchors, notes file, margin layout), `proseText.ts` (plain text of a ProseMirror doc for anchors).
+- `web/src/hooks/documentStore.ts` — folder-scoped document data, per-path draft and save status, retry/conflict recovery, local draft backup. `hooks/notesStore.ts` — notes per document, delayed saves, merge after conflict. `useDocument.tsx` exposes both stores through context to panes.
 - `web/src/components/` — UI. Rich mode is Milkdown (CommonMark + GFM only); source mode is CodeMirror 6. Both load lazily.
 
 ## Rules

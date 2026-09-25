@@ -1,13 +1,13 @@
 // ABOUTME: An A4 sheet that scales with its container and grows by whole pages.
-// ABOUTME: It draws page breaks and page numbers, and prints as real A4 pages.
+// ABOUTME: It draws page breaks and page numbers, prints as real A4 pages, and can hold margin notes beside it.
 
 import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 
 const A4_RATIO = 297 / 210
 
-type Props = { children: ReactNode; onPages?: (pages: number) => void }
+type Props = { children: ReactNode; onPages?: (pages: number) => void; /** Content beside the sheet, such as margin notes. */ aside?: ReactNode }
 
-export function Paper({ children, onPages }: Props) {
+export function Paper({ children, onPages, aside }: Props) {
   const frameRef = useRef<HTMLDivElement>(null)
   const paperRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -52,6 +52,7 @@ export function Paper({ children, onPages }: Props) {
             </Fragment>
           ))}
       </div>
+      {aside}
     </div>
   )
 }
