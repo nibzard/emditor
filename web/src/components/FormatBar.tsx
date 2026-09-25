@@ -1,10 +1,10 @@
-// ABOUTME: The formatting tools in the pane header: blocks, bold and italic, links, notes, highlights, and cuts.
+// ABOUTME: The formatting tools in the pane header: blocks, bold and italic, links, notes, highlights, cuts, and rewrites.
 // ABOUTME: In a narrow pane the tools that do not fit go into a menu; they act on the editor of the pane.
 
 import { type ReactNode, type RefObject, useEffect, useId, useRef, useState } from 'react'
 import { HIGHLIGHT_COLORS, type HighlightColor } from '../lib/annotations'
 import {
-  AddNoteIcon, BoldIcon, BulletsIcon, CutIcon, Heading1Icon, Heading2Icon, ItalicIcon, LinkIcon, MoreIcon, ParagraphIcon,
+  AddNoteIcon, BoldIcon, BulletsIcon, CutIcon, Heading1Icon, Heading2Icon, ItalicIcon, LinkIcon, MoreIcon, ParagraphIcon, RewriteIcon,
 } from './icons'
 import type { RichHandle } from './RichEditor'
 
@@ -14,11 +14,14 @@ type Props = {
   selected: boolean
   /** Notes, highlights, and cuts can be added now. */
   canMark: boolean
+  /** Asks Claude to rewrite the selected text; null when rewrites are off. */
+  onRewrite: (() => void) | null
+  rewriting: boolean
 }
 
 const COLOR_LABEL: Record<HighlightColor, string> = { yellow: 'Yellow', green: 'Green', blue: 'Blue', pink: 'Pink' }
 
-export function FormatBar({ editor, selected, canMark }: Props) {
+export function FormatBar({ editor, selected, canMark, onRewrite, rewriting }: Props) {
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkUrl, setLinkUrl] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -66,6 +69,10 @@ export function FormatBar({ editor, selected, canMark }: Props) {
           </Tool>
         ))}
         <Tool label="Suggest a cut ⌥⌘⌫" disabled={needs} onClick={act((h) => h.annotate({ kind: 'cut' }))}><CutIcon /></Tool>
+        {onRewrite && (
+          <Tool label={rewriting ? 'Rewriting…' : 'Rewrite with Claude'} disabled={rewriting ? 'Wait for the rewrite' : needs}
+            onClick={() => { onRewrite(); setMenuOpen(false) }}><RewriteIcon /></Tool>
+        )}
       </span>
     )}
   </>

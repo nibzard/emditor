@@ -4,7 +4,7 @@
 import {
   ArrowLeft, Bold, Code, FilePlus, LayoutGrid, Heading1, Heading2, Italic, Keyboard, LayoutPanelLeft,
   Columns2, Link, List, type LucideIcon, Ellipsis, MessageSquare, MessageSquarePlus, Scissors, Maximize2, Minimize2, Minus, Monitor, Moon, Sun, ZoomIn, ZoomOut, PanelLeft, Pilcrow, Plus, Search, SquareSplitHorizontal,
-  Type, X,
+  SpellCheck, Type, WandSparkles, X,
 } from 'lucide-react'
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
@@ -63,6 +63,8 @@ export const AddNoteIcon = lucide(MessageSquarePlus, 15)
 export const NotesIcon = lucide(MessageSquare)
 export const CutIcon = lucide(Scissors, 15)
 export const MoreIcon = lucide(Ellipsis, 15)
+export const RewriteIcon = lucide(WandSparkles, 15)
+export const RulesIcon = lucide(SpellCheck)
 
 export function LockIcon({ locked }: { locked: boolean }) {
   return (

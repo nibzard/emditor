@@ -9,7 +9,9 @@ A small local Markdown desk for macOS. One Rust binary starts a local server and
 - **Paper desk**: see every Markdown file as an A4 thumbnail. Sort and stack files; open a stack to choose an individual document.
 - **Scroll together**: when several panes are open, scroll them by the same distance.
 - **Notes**: add a note to selected text, highlight it in one of four colors, or suggest a cut. Notes show in the margin; the pane header shows the word count before and after cuts. Notes stay out of the Markdown file, in `.emditor/notes/<path>.json` next to your documents. A note whose text is gone goes to the shelf under the sheet, where you can attach it to other text.
-- **Format bar**: paragraph, headings, lists, bold, italic, links, notes, highlights, and cuts in each pane header. In a narrow pane, the tools that do not fit go into a menu.
+- **Format bar**: paragraph, headings, lists, bold, italic, links, notes, highlights, cuts, and rewrites in each pane header. In a narrow pane, the tools that do not fit go into a menu.
+- **Writing rules**: a wavy line marks phrases that you want to avoid, a word that occurs two times in a row, and (when you turn it on) sentences longer than your limit. The checks run in the browser while you type, in rich and source mode, and never change the file. Click a mark to keep that occurrence or to ask for a rewrite. Set the rules for the folder in **Writing rules** in the pane header; they stay in `.emditor/rules.json`.
+- **Rewrites with Claude**: when the server has an `ANTHROPIC_API_KEY`, select text (or click a mark) and choose **Rewrite**. The rewrite shows in the margin as a word diff; nothing changes until you accept it. Without a key, rewrites are off and no text goes out of your computer.
 - Rich mode can only make what Markdown can store (CommonMark + GFM tables, task lists, strikethrough).
 - Autosave, a local draft kept until a save succeeds, conflict recovery when a file changes on disk, and print to real A4 pages.
 
@@ -22,7 +24,10 @@ make build                 # builds web/dist, then target/release/emditor
 cd ~/notes && emditor      # serve this folder
 emditor draft.md           # open one file (its folder is served)
 emditor --port 5000 --no-open
+ANTHROPIC_API_KEY=sk-... emditor   # turn on rewrites with Claude
 ```
+
+Rewrites use `claude-opus-5-5`. Set `EMDITOR_CLAUDE_MODEL` to use a different model. Only the passage, some text around it, and the rules that it breaks go to the Anthropic API, and only when you ask for a rewrite.
 
 The server listens on 127.0.0.1 only and refuses requests from other hosts, origins, and cross-site pages.
 

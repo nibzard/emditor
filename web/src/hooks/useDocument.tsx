@@ -1,23 +1,32 @@
-// ABOUTME: React access to the folder's document and notes stores and their global save lifecycle.
+// ABOUTME: React access to the folder's document, notes, and rules stores, their global save lifecycle, and rewrites.
 // ABOUTME: The stores outlive panes, so layout and editor changes never own the only draft.
 
 import { createContext, type ReactNode, useContext, useEffect, useState, useSyncExternalStore } from 'react'
+import { api } from '../api'
 import type { Note, TextQuote } from '../lib/annotations'
 import { DocumentStore } from './documentStore'
 import { NotesStore } from './notesStore'
+import { RulesStore } from './rulesStore'
 
 export type { SaveStatus } from './documentStore'
 
 const Context = createContext<DocumentStore | null>(null)
 const NotesContext = createContext<NotesStore | null>(null)
+const RulesContext = createContext<RulesStore | null>(null)
+const RewriteContext = createContext(false)
 
 export function DocumentProvider({ root, children }: { root: string; children: ReactNode }) {
   const [store] = useState(() => new DocumentStore(root))
   const [notes] = useState(() => new NotesStore())
+  const [rules] = useState(() => new RulesStore())
+  const [canRewrite, setCanRewrite] = useState(false)
+  useEffect(() => {
+    api.rewriteStatus().then((status) => setCanRewrite(status.available), (err) => console.error('emditor: cannot read the rewrite status', err))
+  }, [])
   useEffect(() => {
     const onSave = () => { void store.saveAll(); void notes.saveAll() }
     const onHidden = () => { if (document.visibilityState === 'hidden') onSave() }
-    const onFocus = () => { void store.refresh(); void notes.refresh() }
+    const onFocus = () => { void store.refresh(); void notes.refresh(); void rules.refresh() }
     const onUnload = (event: BeforeUnloadEvent) => {
       if (store.hasUnsettled() || notes.hasUnsettled()) event.preventDefault()
     }
@@ -31,8 +40,16 @@ export function DocumentProvider({ root, children }: { root: string; children: R
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('beforeunload', onUnload)
     }
-  }, [store, notes])
-  return <Context.Provider value={store}><NotesContext.Provider value={notes}>{children}</NotesContext.Provider></Context.Provider>
+  }, [store, notes, rules])
+  return (
+    <Context.Provider value={store}>
+      <NotesContext.Provider value={notes}>
+        <RulesContext.Provider value={rules}>
+          <RewriteContext.Provider value={canRewrite}>{children}</RewriteContext.Provider>
+        </RulesContext.Provider>
+      </NotesContext.Provider>
+    </Context.Provider>
+  )
 }
 
 export function useDocumentStore() {
@@ -83,4 +100,16 @@ export function useNotes(path: string | null) {
     remove: (id: string) => { if (path) store.remove(path, id) },
     retry: () => (path ? store.save(path) : Promise.resolve()),
   }
+}
+
+export function useRules() {
+  const store = useContext(RulesContext)
+  if (!store) throw new Error('DocumentProvider is missing')
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
+  return { ...snapshot, change: store.change.bind(store), retry: store.retry.bind(store) }
+}
+
+/** True when the server can rewrite passages with Claude. */
+export function useCanRewrite() {
+  return useContext(RewriteContext)
 }

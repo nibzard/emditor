@@ -2360,3 +2360,224 @@ select:focus-visible {
 .shelf-note[data-kind='cut'] blockquote {
   text-decoration: line-through;
 }
+
+/* ——— Rewrites ———
+   A rewrite marks its text with a dotted line; its card shows a word diff. */
+
+.md-body .mark-rewrite {
+  text-decoration: underline dotted var(--accent-ink);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: background-color 0.2s var(--ease);
+}
+
+.md-body .mark-rewrite.is-active {
+  background: var(--accent-soft);
+}
+
+.note-card.note-rewrite {
+  --leader: var(--accent-ink);
+  border-left-style: dotted;
+}
+
+.note-rewrite .cut-label {
+  color: var(--muted);
+}
+
+.note-rewrite .note-actions {
+  opacity: 1;
+}
+
+.rewrite-diff {
+  margin: 0;
+  font-style: normal;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rewrite-diff del {
+  color: var(--muted);
+  text-decoration-color: var(--accent-ink);
+}
+
+.rewrite-diff ins {
+  text-decoration: none;
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.note-dot.is-rewrite::after {
+  background: var(--accent-ink);
+}
+
+/* ——— Writing lint ———
+   A finding is a wavy line under the text. It is a decoration only, so it does not print or copy. */
+
+.lint-mark {
+  text-decoration: underline wavy var(--lint, var(--accent));
+  text-decoration-thickness: 1px;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+
+.md-body .lint-mark {
+  cursor: pointer;
+}
+
+.lint-sentenceLength {
+  --lint: var(--hl-blue-solid);
+}
+
+@media print {
+  .lint-mark,
+  .md-body .mark-rewrite {
+    text-decoration: none;
+    background: none;
+  }
+}
+
+.lint-card {
+  position: fixed;
+  z-index: 50;
+  padding: 12px 14px 8px;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: var(--shadow-lift);
+  font: 13px/1.45 var(--sans);
+  color: var(--ink-2);
+}
+
+.lint-card-rule {
+  margin: 0 0 4px;
+  font: 600 10.5px var(--sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.lint-card-message {
+  margin: 0 0 6px;
+  color: var(--ink);
+}
+
+.lint-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0 -10px;
+}
+
+.lint-card-actions .text-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* ——— Rules dialog ——— */
+
+.rules-panel {
+  align-items: start;
+}
+
+.rules-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.rules-head h2 {
+  margin: 0;
+}
+
+.rules-status {
+  display: inline-flex;
+  align-items: baseline;
+  color: var(--faint-ink);
+  font: 12px var(--sans);
+}
+
+.rules-status .text-btn {
+  padding: 0 6px;
+}
+
+.rule {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font: 13px/1.45 var(--sans);
+  color: var(--ink-2);
+}
+
+.rule-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.rule-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 24px;
+}
+
+.rule-help {
+  margin: 0;
+  padding-left: 24px;
+  color: var(--faint-ink);
+}
+
+.rule-phrases,
+.rule-number {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: 13px/1.5 var(--mono);
+  caret-color: var(--accent);
+}
+
+.rule-phrases {
+  margin-left: 24px;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.rule-number {
+  width: 64px;
+  padding: 2px 6px;
+}
+
+.rule-phrases:focus,
+.rule-number:focus {
+  outline: 0;
+  border-color: var(--accent);
+}
+
+.rule-kept ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rule-kept li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--bg);
+}
+
+.rule-kept em {
+  color: var(--faint-ink);
+}
+
+.rules-done {
+  align-self: flex-end;
+  margin-top: 8px;
+  color: var(--ink);
+}

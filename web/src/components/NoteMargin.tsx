@@ -1,8 +1,8 @@
-// ABOUTME: Margin notes, highlight notes, and cuts next to the A4 sheet, each at the height of its text.
+// ABOUTME: Margin notes, highlight notes, cuts, and rewrites next to the A4 sheet, each at the height of its text.
 // ABOUTME: When the pane has no room beside the sheet, each one shrinks to a dot in the sheet margin.
 
 import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react'
-import { colorOf, HIGHLIGHT_COLORS, type HighlightColor, kindOf, type Note, stackMargin } from '../lib/annotations'
+import { colorOf, diffWords, HIGHLIGHT_COLORS, type HighlightColor, kindOf, type Note, stackMargin } from '../lib/annotations'
 import { wordCount } from '../lib/text'
 import { timeAgo } from '../lib/text'
 
@@ -19,6 +19,7 @@ type Props = {
   onDelete: (id: string) => void
   onColor: (id: string, color: HighlightColor) => void
   onAcceptCut: (id: string) => void
+  onAcceptRewrite: (id: string) => void
 }
 
 const CARD_WIDTH = 232
@@ -27,7 +28,7 @@ const STACK_GAP = 10
 
 type Layout = { compact: boolean; anchors: Record<string, number> }
 
-export function NoteMargin({ notes, active, editing, onActivate, onHover, onEdit, onChange, onResolve, onDelete, onColor, onAcceptCut }: Props) {
+export function NoteMargin({ notes, active, editing, onActivate, onHover, onEdit, onChange, onResolve, onDelete, onColor, onAcceptCut, onAcceptRewrite }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
   const cards = useRef(new Map<string, HTMLElement>())
   const [layout, setLayout] = useState<Layout>({ compact: false, anchors: {} })
@@ -106,7 +107,7 @@ export function NoteMargin({ notes, active, editing, onActivate, onHover, onEdit
         return (
           <NoteCard key={note.id} note={note} top={tops[i]} active={isActive} editing={editing === note.id} cardRef={cardRef(note.id)}
             onActivate={() => onActivate(note.id)} onHover={onHover} onEdit={onEdit} onChange={onChange} onResolve={onResolve} onDelete={onDelete}
-            onColor={onColor} onAcceptCut={onAcceptCut} />
+            onColor={onColor} onAcceptCut={onAcceptCut} onAcceptRewrite={onAcceptRewrite} />
         )
       })}
     </div>
@@ -116,6 +117,7 @@ export function NoteMargin({ notes, active, editing, onActivate, onHover, onEdit
 function dotLabel(note: Note): string {
   const kind = kindOf(note)
   if (kind === 'cut') return `Suggested cut: ${note.quote.exact}`
+  if (kind === 'rewrite') return `Suggested rewrite: ${note.replacement ?? ''}`
   if (kind === 'highlight') return `Highlight: ${note.body || note.quote.exact}`
   return `Note: ${note.body || 'empty'}`
 }
@@ -134,9 +136,10 @@ type CardProps = {
   onDelete: (id: string) => void
   onColor: (id: string, color: HighlightColor) => void
   onAcceptCut: (id: string) => void
+  onAcceptRewrite: (id: string) => void
 }
 
-function NoteCard({ note, top, active, editing, cardRef, onActivate, onHover, onEdit, onChange, onResolve, onDelete, onColor, onAcceptCut }: CardProps) {
+function NoteCard({ note, top, active, editing, cardRef, onActivate, onHover, onEdit, onChange, onResolve, onDelete, onColor, onAcceptCut, onAcceptRewrite }: CardProps) {
   const kind = kindOf(note)
   const frame = (className: string, children: ReactNode) => (
     <article ref={cardRef} className={className} data-active={active} style={{ top }}
@@ -156,6 +159,23 @@ function NoteCard({ note, top, active, editing, cardRef, onActivate, onHover, on
         </span>
       </footer>
     ))
+  }
+
+  if (kind === 'rewrite') {
+    return frame('note-card note-rewrite', <>
+      <p className="rewrite-diff">
+        {diffWords(note.quote.exact, note.replacement ?? '').map((part, i) =>
+          part.kind === 'same' ? <span key={i}>{part.text}</span> : part.kind === 'add' ? <ins key={i}>{part.text}</ins> : <del key={i}>{part.text}</del>,
+        )}
+      </p>
+      <footer className="note-meta">
+        <span className="cut-label">Rewrite</span>
+        <span className="note-actions">
+          <button type="button" onClick={() => onAcceptRewrite(note.id)}>Accept</button>
+          <button type="button" onClick={() => onDelete(note.id)}>Reject</button>
+        </span>
+      </footer>
+    </>)
   }
 
   // A comment without text is removed when editing ends; a highlight stays without text.

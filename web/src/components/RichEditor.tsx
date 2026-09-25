@@ -1,5 +1,5 @@
 // ABOUTME: Rich (WYSIWYG) editor built on Milkdown with only the CommonMark and GFM schema.
-// ABOUTME: It can show only what Markdown can store, gives Markdown text back on each change, and marks notes.
+// ABOUTME: It can show only what Markdown can store, gives Markdown text back on each change, and marks notes and lint findings.
 
 // Marks a transaction that brings in text from another pane, so that it is not sent back as an edit.
 const EXTERNAL = new PluginKey<boolean>('emditor-external')
@@ -23,16 +23,19 @@ import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { $prose, $view } from '@milkdown/kit/utils'
 import { HIGHLIGHT_COLORS, type HighlightColor, type Note, type NoteKind, type TextQuote } from '../lib/annotations'
+import type { Finding, LintRules } from '../lib/lint'
+import { docText } from '../lib/proseText'
 import { resolveAsset } from '../lib/text'
-import { acceptCuts, type AnchorReport, notesPlugin, selectionQuote, setNotes } from './notesPlugin'
+import { LINT, lintPlugin, setLintRules } from './lintPlugin'
+import { acceptCuts, acceptRewrite, type AnchorReport, notesPlugin, selectionQuote, setNotes } from './notesPlugin'
 
 /** What a new annotation on the selection is: a note, a highlight with a color, or a cut. */
-export type Mark = { kind: NoteKind; color?: HighlightColor }
+export type Mark = { kind: Exclude<NoteKind, 'rewrite'>; color?: HighlightColor }
 
 /** A formatting command for the selection or the current block. */
 export type Format = 'paragraph' | 'heading1' | 'heading2' | 'bullets' | 'bold' | 'italic'
 
-/** Lets the pane use the editor: formatting, annotations, the selection, and accepted cuts. */
+/** Lets the pane use the editor: formatting, annotations, the selection, and accepted cuts and rewrites. */
 export type RichHandle = {
   format: (format: Format) => void
   link: (href: string) => void
@@ -40,6 +43,10 @@ export type RichHandle = {
   selectionQuote: () => TextQuote | null
   /** Deletes the text of the cuts in one undo step. Returns false when none of them has text now. */
   acceptCuts: (ids: string[]) => boolean
+  /** Puts the replacement of a rewrite in place of its text. Returns false when the text is gone. */
+  acceptRewrite: (id: string) => boolean
+  /** The plain text of the document, which note quotes and lint findings refer to. */
+  plainText: () => string
 }
 
 type Props = {
@@ -61,9 +68,13 @@ type Props = {
   handleRef?: MutableRefObject<RichHandle | null>
   /** Called when text becomes selected or the selection goes away. */
   onSelection?: (selected: boolean) => void
+  /** The writing rules to check with; null turns the lint off. */
+  lintRules: LintRules | null
+  /** Called with the lint finding under a click in the text, and the box of its mark. */
+  onLint: (finding: Finding, box: DOMRect) => void
 }
 
-export function RichEditor({ docPath, initial, content, onChange, onReady, notes, highlight, onAnnotate, onAnchors, onActivateNote, handleRef, onSelection }: Props) {
+export function RichEditor({ docPath, initial, content, onChange, onReady, notes, highlight, onAnnotate, onAnchors, onActivateNote, handleRef, onSelection, lintRules, onLint }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
   const onSelectionRef = useRef(onSelection)
@@ -86,6 +97,10 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
   onAnnotateRef.current = onAnnotate
   onAnchorsRef.current = onAnchors
   onActivateNoteRef.current = onActivateNote
+  const lintRulesRef = useRef(lintRules)
+  lintRulesRef.current = lintRules
+  const onLintRef = useRef(onLint)
+  onLintRef.current = onLint
 
   const readSelection = (): TextQuote | null => {
     let quote: TextQuote | null = null
@@ -147,6 +162,24 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
           }
         })
         return done
+      },
+      acceptRewrite: (id) => {
+        let done = false
+        editorRef.current?.action((ctx) => {
+          const view = ctx.get(editorViewCtx)
+          const tr = acceptRewrite(view.state, id)
+          if (tr) {
+            view.dispatch(tr)
+            view.focus()
+            done = true
+          }
+        })
+        return done
+      },
+      plainText: () => {
+        let text = ''
+        run((view) => { text = docText(view.state.doc).text })
+        return text
       },
     }
     return () => { handleRef.current = null }
@@ -223,6 +256,13 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
       if (selection && !selection.isCollapsed) return
       const anchor = (e.target as HTMLElement).closest<HTMLElement>('[data-note-id]')
       onActivateNoteRef.current(anchor?.dataset.noteId ?? null)
+      const mark = (e.target as HTMLElement).closest<HTMLElement>('[data-lint]')
+      if (mark && editor) {
+        editor.action((ctx) => {
+          const finding = LINT.getState(ctx.get(editorViewCtx).state)?.findings[Number(mark.dataset.lint)]
+          if (finding) onLintRef.current(finding, mark.getBoundingClientRect())
+        })
+      }
     }
     host.addEventListener('click', onNoteClick)
     // ⌥⌘M adds a note, ⌥⌘1–4 highlight, and ⌥⌘⌫ marks a cut. KeyboardEvent.code, because ⌥ changes the key on macOS.
@@ -239,6 +279,7 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
     }
     host.addEventListener('keydown', onNoteKey, true)
     const annotations = $prose(() => notesPlugin((report) => onAnchorsRef.current(report)))
+    const lintMarks = $prose(() => lintPlugin())
 
     Editor.make()
       .config((ctx) => {
@@ -260,6 +301,7 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
       .use(imageView)
       .use(externalPlugin)
       .use(annotations)
+      .use(lintMarks)
       .create()
       .then((created) => {
         if (disposed) {
@@ -272,6 +314,7 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
         created.action((ctx) => {
           const view = ctx.get(editorViewCtx)
           view.dispatch(setNotes(view.state.tr, notesRef.current))
+          view.dispatch(setLintRules(view.state.tr, lintRulesRef.current))
         })
         updateSelection()
         onReadyRef.current?.()
@@ -302,6 +345,13 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
       view.dispatch(setNotes(withDomSelection(view), { notes, highlight }))
     })
   }, [notes, highlight])
+
+  useEffect(() => {
+    editorRef.current?.action((ctx) => {
+      const view = ctx.get(editorViewCtx)
+      view.dispatch(setLintRules(withDomSelection(view), lintRules))
+    })
+  }, [lintRules])
 
   return <div ref={rootRef} className="editor editor-rich" />
 }

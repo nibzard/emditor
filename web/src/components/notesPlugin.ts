@@ -1,5 +1,5 @@
-// ABOUTME: ProseMirror plugin that marks the text of each note, highlight, and cut, and reports which ones it found.
-// ABOUTME: It only adds decorations; the Markdown changes only when a cut is accepted.
+// ABOUTME: ProseMirror plugin that marks the text of each note, highlight, cut, and rewrite, and reports which ones it found.
+// ABOUTME: It only adds decorations; the Markdown changes only when a cut or a rewrite is accepted.
 
 import { type Node } from '@milkdown/kit/prose/model'
 import { type EditorState, Plugin, PluginKey, type Transaction } from '@milkdown/kit/prose/state'
@@ -40,6 +40,7 @@ function compute(doc: Node, { notes, highlight }: Input): State {
 function markClass(note: Note): string {
   const kind = kindOf(note)
   if (kind === 'highlight') return `mark-highlight hl-${colorOf(note)}`
+  if (kind === 'rewrite') return 'mark-rewrite'
   return kind === 'cut' ? 'mark-cut' : 'note-anchor'
 }
 
@@ -61,6 +62,19 @@ export function acceptCuts(state: EditorState, ids: string[]): Transaction | nul
     if (to > from) tr.delete(from, to)
   }
   return tr
+}
+
+/** A transaction that puts the replacement of a rewrite in place of its text, or null when the text is gone. */
+export function acceptRewrite(state: EditorState, id: string): Transaction | null {
+  const plugin = NOTES.getState(state)
+  const span = plugin?.spans.get(id)
+  const note = plugin?.notes.find((n) => n.id === id)
+  if (!span || note?.replacement === undefined) return null
+  const map = docText(state.doc)
+  const from = map.toPos(span.from, 'start')
+  const to = map.toPos(span.to, 'end')
+  // Text typed at the start takes the marks there, so a rewrite of bold text stays bold.
+  return note.replacement ? state.tr.insertText(note.replacement, from, to) : state.tr.delete(from, to)
 }
 
 /** Sets the notes to show or the note to highlight. */

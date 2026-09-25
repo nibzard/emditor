@@ -3,18 +3,22 @@
 
 import { AnimatePresence, motion } from 'motion/react'
 import { type CSSProperties, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { type SaveStatus, useDocument, useNotes } from '../hooks/useDocument'
-import { kindOf, type Note, type TextQuote, wordsAfterCuts } from '../lib/annotations'
+import { api } from '../api'
+import { type SaveStatus, useCanRewrite, useDocument, useNotes, useRules } from '../hooks/useDocument'
+import { contextAround, kindOf, locate, type Note, quoteAt, type TextQuote, wordsAfterCuts } from '../lib/annotations'
+import { type Finding, keep } from '../lib/lint'
 import type { ScrollSync } from '../lib/scrollSync'
 import { dirOf, titleFromPath } from '../lib/text'
 import type { Mode, PaneState } from '../lib/workspace'
 import { FormatBar } from './FormatBar'
-import { CloseIcon, NotesIcon, RichIcon, SourceIcon, SplitIcon } from './icons'
+import { CloseIcon, NotesIcon, RichIcon, RulesIcon, SourceIcon, SplitIcon } from './icons'
+import { LintCard } from './LintCard'
 import { NoteMargin } from './NoteMargin'
 import type { AnchorReport } from './notesPlugin'
 import { NoteShelf } from './NoteShelf'
 import { Paper } from './Paper'
 import type { Mark, RichHandle } from './RichEditor'
+import { RulesDialog } from './RulesDialog'
 
 type Props = {
   pane: PaneState
@@ -58,6 +62,13 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
   const [anchors, setAnchors] = useState<{ attached: string[]; detached: string[] }>({ attached: [], detached: [] })
   const richRef = useRef<RichHandle | null>(null)
   const [selected, setSelected] = useState(false)
+  const rules = useRules()
+  const canRewrite = useCanRewrite()
+  const lintRules = rules.loaded ? rules.rules : null
+  const [lintCard, setLintCard] = useState<{ finding: Finding; box: DOMRect } | null>(null)
+  const [rulesOpen, setRulesOpen] = useState(false)
+  const [rewriting, setRewriting] = useState(false)
+  const [rewriteError, setRewriteError] = useState<string | null>(null)
   const notesOn = showNotes && pane.mode === 'rich' && notes.loaded
   const editorNotes = notesOn ? notes.notes : NO_NOTES
   const byId = useMemo(() => new Map(notes.notes.map((n) => [n.id, n])), [notes.notes])
@@ -75,6 +86,8 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
     setActive(null)
     setEditing(null)
     setAnchors({ attached: [], detached: [] })
+    setLintCard(null)
+    setRewriteError(null)
   }, [pane.path])
 
   const requoteRef = useRef(notes.requote)
@@ -115,6 +128,56 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
     if (!richRef.current?.acceptCuts(ids)) return
     for (const id of ids) notes.remove(id)
     setActive(null)
+  }
+  const acceptRewrite = (id: string) => {
+    if (!richRef.current?.acceptRewrite(id)) return
+    notes.remove(id)
+    setActive(null)
+  }
+  // Rewrites are suggestions in the margin, so they need the notes of the document and the formatted text.
+  const rewriteOn = canRewrite && notes.loaded && pane.mode === 'rich'
+  const requestRewrite = async (quote: TextQuote, context: string, broken: string[]) => {
+    setRewriting(true)
+    setRewriteError(null)
+    try {
+      const { text } = await api.rewrite({ text: quote.exact, context, rules: broken })
+      if (text === quote.exact) {
+        setRewriteError('Claude did not change this text.')
+        return false
+      }
+      const note: Note = { id: crypto.randomUUID(), quote, body: '', created: Date.now(), resolved: false, kind: 'rewrite', replacement: text }
+      notes.add(note)
+      setActive(note.id)
+      if (!showNotes) onShowNotes(true)
+      return true
+    } catch (err) {
+      console.error('emditor: rewrite failed', err)
+      setRewriteError('The rewrite failed. Try again in a moment.')
+      return false
+    } finally {
+      setRewriting(false)
+    }
+  }
+  const rewriteFinding = async (finding: Finding) => {
+    const text = richRef.current?.plainText()
+    if (!text) return
+    const quote = quoteAt(text, finding.around.from, finding.around.to)
+    if (await requestRewrite(quote, contextAround(text, finding.around), [finding.message])) setLintCard(null)
+  }
+  const rewriteSelection = () => {
+    const quote = richRef.current?.selectionQuote()
+    const text = richRef.current?.plainText()
+    if (!quote || !text) return
+    if (quote.exact.includes('\n')) {
+      setRewriteError('Select text inside one paragraph to rewrite it.')
+      return
+    }
+    const span = locate(text, quote)
+    void requestRewrite(quote, span ? contextAround(text, span) : '', [])
+  }
+  const keepFinding = (finding: Finding) => {
+    void rules.change((r) => keep(r, finding))
+    setLintCard(null)
   }
   const editNote = (id: string | null) => {
     setEditing(id)
@@ -199,7 +262,9 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
           {dir && <span className="pane-title-dir">{dir}</span>}
         </button>
         <SaveDot status={status} />
-        {doc && pane.mode === 'rich' && <FormatBar editor={richRef} selected={selected} canMark={Boolean(annotate)} />}
+        {doc && pane.mode === 'rich' && (
+          <FormatBar editor={richRef} selected={selected} canMark={Boolean(annotate)} onRewrite={rewriteOn ? rewriteSelection : null} rewriting={rewriting} />
+        )}
         <span className="pane-tools chrome">
           {doc && (
             <span className="pane-stats">
@@ -212,6 +277,11 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
               aria-label={`${showNotes ? 'Hide' : 'Show'} notes${openCount ? `, ${openCount} open` : ''}`}>
               <NotesIcon />
               {openCount > 0 && <span className="notes-count" aria-hidden>{openCount}</span>}
+            </button>
+          )}
+          {pane.path && (
+            <button className="icon-btn icon-btn-sm" onClick={() => setRulesOpen(true)} data-tip="Writing rules" aria-label="Writing rules">
+              <RulesIcon />
             </button>
           )}
           {pane.path && (
@@ -250,6 +320,23 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
         )}
       </AnimatePresence>
 
+      <AnimatePresence initial={false}>
+        {rewriteError && (
+          <motion.div className="pane-alert" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
+            <span>{rewriteError}</span>
+            <button onClick={() => setRewriteError(null)}>Dismiss</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>{rulesOpen && <RulesDialog onClose={() => setRulesOpen(false)} />}</AnimatePresence>
+
+      {lintCard && (
+        <LintCard finding={lintCard.finding} box={lintCard.box} rewriting={rewriting}
+          onRewrite={rewriteOn ? () => void rewriteFinding(lintCard.finding) : null}
+          onKeep={() => keepFinding(lintCard.finding)} onRules={() => { setLintCard(null); setRulesOpen(true) }} onClose={() => setLintCard(null)} />
+      )}
+
       <div className="pane-scroll" ref={scrollRef}>
         {pane.path ? (
           doc && doc.path === pane.path ? (
@@ -264,16 +351,18 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
                 aside={notesOn && marginNotes.length > 0 ? (
                   <NoteMargin notes={marginNotes} active={active} editing={editing} onActivate={setActive} onHover={setHover}
                     onEdit={editNote} onChange={(id, body) => notes.update(id, { body })} onResolve={resolveNote} onDelete={deleteNote}
-                    onColor={(id, color) => notes.update(id, { color })} onAcceptCut={(id) => acceptCuts([id])} />
+                    onColor={(id, color) => notes.update(id, { color })} onAcceptCut={(id) => acceptCuts([id])}
+                    onAcceptRewrite={acceptRewrite} />
                 ) : null}
               >
                 <Suspense fallback={null}>
                   {pane.mode === 'rich' ? (
                     <RichEditor docPath={doc.path} initial={editorSeed.current} content={doc.content} onChange={edit} onReady={onReady}
                       notes={editorNotes} highlight={hover ?? active} onAnnotate={annotate} onAnchors={onAnchors}
-                      onActivateNote={setActive} handleRef={richRef} onSelection={setSelected} />
+                      onActivateNote={setActive} handleRef={richRef} onSelection={setSelected}
+                      lintRules={lintRules} onLint={(finding, box) => setLintCard({ finding, box })} />
                   ) : (
-                    <SourceEditor initial={editorSeed.current} content={doc.content} onChange={edit} onReady={onReady} />
+                    <SourceEditor initial={editorSeed.current} content={doc.content} onChange={edit} onReady={onReady} lintRules={lintRules} />
                   )}
                 </Suspense>
               </Paper>

@@ -1,5 +1,5 @@
 // ABOUTME: Markdown source editor built on CodeMirror 6.
-// ABOUTME: It shows the plain text with quiet syntax colours and no line numbers.
+// ABOUTME: It shows the plain text with quiet syntax colours and no line numbers, and underlines lint findings.
 
 import { useEffect, useRef } from 'react'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
@@ -8,6 +8,8 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { Annotation, EditorState, Transaction } from '@codemirror/state'
 import { drawSelection, EditorView, keymap, placeholder } from '@codemirror/view'
 import { tags as t } from '@lezer/highlight'
+import type { LintRules } from '../lib/lint'
+import { setSourceLintRules, sourceLint } from './sourceLint'
 
 const highlight = HighlightStyle.define([
   { tag: t.heading1, fontWeight: '650', fontSize: '1.2em' },
@@ -45,15 +47,19 @@ type Props = {
   content: string
   onChange: (markdown: string) => void
   onReady?: () => void
+  /** The writing rules to check with; null turns the lint off. */
+  lintRules: LintRules | null
 }
 
-export function SourceEditor({ initial, content, onChange, onReady }: Props) {
+export function SourceEditor({ initial, content, onChange, onReady, lintRules }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
   const onReadyRef = useRef(onReady)
   onChangeRef.current = onChange
   onReadyRef.current = onReady
+  const lintRulesRef = useRef(lintRules)
+  lintRulesRef.current = lintRules
 
   useEffect(() => {
     const view = new EditorView({
@@ -69,6 +75,7 @@ export function SourceEditor({ initial, content, onChange, onReady }: Props) {
           EditorView.lineWrapping,
           placeholder('Start writing…'),
           theme,
+          sourceLint(lintRulesRef.current),
           EditorView.updateListener.of((update) => {
             if (update.docChanged && !update.transactions.some((tr) => tr.annotation(external))) {
               onChangeRef.current(update.state.doc.toString())
@@ -101,6 +108,10 @@ export function SourceEditor({ initial, content, onChange, onReady }: Props) {
     }
     view.dispatch({ changes: { from: start, to: endOld, insert: content.slice(start, endNew) }, annotations: [external.of(true), Transaction.addToHistory.of(false)] })
   }, [content])
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: setSourceLintRules.of(lintRules) })
+  }, [lintRules])
 
   return <div ref={rootRef} className="editor editor-source" />
 }
