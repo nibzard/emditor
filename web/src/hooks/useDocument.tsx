@@ -13,15 +13,15 @@ export type { SaveStatus } from './documentStore'
 const Context = createContext<DocumentStore | null>(null)
 const NotesContext = createContext<NotesStore | null>(null)
 const RulesContext = createContext<RulesStore | null>(null)
-const RewriteContext = createContext(false)
+const RewriteContext = createContext<string | null>(null)
 
 export function DocumentProvider({ root, children }: { root: string; children: ReactNode }) {
   const [store] = useState(() => new DocumentStore(root))
   const [notes] = useState(() => new NotesStore())
   const [rules] = useState(() => new RulesStore())
-  const [canRewrite, setCanRewrite] = useState(false)
+  const [rewriteModel, setRewriteModel] = useState<string | null>(null)
   useEffect(() => {
-    api.rewriteStatus().then((status) => setCanRewrite(status.available), (err) => console.error('emditor: cannot read the rewrite status', err))
+    api.rewriteStatus().then((status) => setRewriteModel(status.available ? status.model ?? null : null), (err) => console.error('emditor: cannot read the rewrite status', err))
   }, [])
   useEffect(() => {
     const onSave = () => { void store.saveAll(); void notes.saveAll() }
@@ -45,7 +45,7 @@ export function DocumentProvider({ root, children }: { root: string; children: R
     <Context.Provider value={store}>
       <NotesContext.Provider value={notes}>
         <RulesContext.Provider value={rules}>
-          <RewriteContext.Provider value={canRewrite}>{children}</RewriteContext.Provider>
+          <RewriteContext.Provider value={rewriteModel}>{children}</RewriteContext.Provider>
         </RulesContext.Provider>
       </NotesContext.Provider>
     </Context.Provider>
@@ -109,7 +109,7 @@ export function useRules() {
   return { ...snapshot, change: store.change.bind(store), retry: store.retry.bind(store) }
 }
 
-/** True when the server can rewrite passages with Claude. */
-export function useCanRewrite() {
+/** The model that rewrites passages, or null when rewrites are off. */
+export function useRewriteModel() {
   return useContext(RewriteContext)
 }

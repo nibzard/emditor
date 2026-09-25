@@ -14,14 +14,16 @@ type Props = {
   selected: boolean
   /** Notes, highlights, and cuts can be added now. */
   canMark: boolean
-  /** Asks Claude to rewrite the selected text; null when rewrites are off. */
+  /** Asks the model to rewrite the selected text; null when rewrites are off. */
   onRewrite: (() => void) | null
+  /** The model that rewrites, for the label. */
+  rewriteModel: string | null
   rewriting: boolean
 }
 
 const COLOR_LABEL: Record<HighlightColor, string> = { yellow: 'Yellow', green: 'Green', blue: 'Blue', pink: 'Pink' }
 
-export function FormatBar({ editor, selected, canMark, onRewrite, rewriting }: Props) {
+export function FormatBar({ editor, selected, canMark, onRewrite, rewriteModel, rewriting }: Props) {
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkUrl, setLinkUrl] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -70,7 +72,7 @@ export function FormatBar({ editor, selected, canMark, onRewrite, rewriting }: P
         ))}
         <Tool label="Suggest a cut ⌥⌘⌫" disabled={needs} onClick={act((h) => h.annotate({ kind: 'cut' }))}><CutIcon /></Tool>
         {onRewrite && (
-          <Tool label={rewriting ? 'Rewriting…' : 'Rewrite with Claude'} disabled={rewriting ? 'Wait for the rewrite' : needs}
+          <Tool label={rewriting ? 'Rewriting…' : `Rewrite with ${rewriteModel ?? 'AI'}`} disabled={rewriting ? 'Wait for the rewrite' : needs}
             onClick={() => { onRewrite(); setMenuOpen(false) }}><RewriteIcon /></Tool>
         )}
       </span>

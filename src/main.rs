@@ -21,9 +21,13 @@ OPTIONS:
     -V, --version       Show the version
 
 ENVIRONMENT:
-    ANTHROPIC_API_KEY     Turns on rewrites with Claude (off when not set)
-    EMDITOR_CLAUDE_MODEL  The model for rewrites (default: claude-opus-5-5)
-    ANTHROPIC_BASE_URL    The API origin (default: https://api.anthropic.com)
+    ANTHROPIC_API_KEY         Turns on rewrites with Claude (Anthropic Messages API)
+    OPENAI_API_KEY            Turns on rewrites with OpenAI (Responses API)
+    EMDITOR_REWRITE_PROVIDER  anthropic or openai (default: the first with a key)
+    EMDITOR_REWRITE_MODEL     The model (default: claude-opus-5-5 or gpt-6-sol)
+    ANTHROPIC_BASE_URL        Default: https://api.anthropic.com
+    OPENAI_BASE_URL           Default: https://api.openai.com/v1
+    Without a key, rewrites are off.
 ";
 
 struct Options {
@@ -123,10 +127,16 @@ async fn main() -> ExitCode {
     if let Some(name) = &initial_file {
         url.push_str(&format!("?file={}", encode_query(name)));
     }
-    let rewrite = emditor::RewriteConfig::from_env();
+    let rewrite = match emditor::RewriteConfig::from_env() {
+        Ok(rewrite) => rewrite,
+        Err(err) => {
+            eprintln!("emditor: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
     let rewrites = match &rewrite {
         Some(config) => format!("on ({})", config.model),
-        None => "off (set ANTHROPIC_API_KEY)".into(),
+        None => "off (set ANTHROPIC_API_KEY or OPENAI_API_KEY)".into(),
     };
     println!("emditor  {}\n         {url}\n         rewrites {rewrites}\n         Ctrl+C to stop", root.display());
 

@@ -368,20 +368,22 @@ async fn rewrite_is_unavailable_without_a_key() {
     assert_eq!(body["error"], "rewrite-unavailable");
 }
 
+
 type Seen = std::sync::Arc<std::sync::Mutex<Vec<(String, Value)>>>;
 
-/// A stand-in for the Anthropic Messages API. It records each request and gives the reply that the test sets.
-async fn fake_anthropic(reply: (StatusCode, Value)) -> (String, Seen) {
+/// A stand-in for a provider API at `path`. It records the value of the `auth` header and the body of each
+/// request, and gives the reply that the test sets. Returns the origin of the stand-in.
+async fn fake_api(path: &'static str, auth: &'static str, reply: (StatusCode, Value)) -> (String, Seen) {
     use axum::routing::post;
     let seen: Seen = Default::default();
     let record = seen.clone();
     let app = Router::new().route(
-        "/v1/messages",
+        path,
         post(move |headers: axum::http::HeaderMap, axum::Json(body): axum::Json<Value>| {
             let record = record.clone();
             let reply = reply.clone();
             async move {
-                let key = headers.get("x-api-key").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+                let key = headers.get(auth).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
                 record.lock().unwrap().push((key, body));
                 (reply.0, axum::Json(reply.1))
             }
@@ -393,17 +395,51 @@ async fn fake_anthropic(reply: (StatusCode, Value)) -> (String, Seen) {
     (url, seen)
 }
 
-fn rewrite_app(dir: &TempDir, base_url: String) -> Router {
+async fn fake_anthropic(reply: (StatusCode, Value)) -> (String, Seen) {
+    fake_api("/v1/messages", "x-api-key", reply).await
+}
+
+/// The OpenAI base URL includes `/v1`, as with the official SDKs.
+async fn fake_openai(reply: (StatusCode, Value)) -> (String, Seen) {
+    let (origin, seen) = fake_api("/v1/responses", "authorization", reply).await;
+    (format!("{origin}/v1"), seen)
+}
+
+fn rewrite_app(dir: &TempDir, provider: emditor::Provider, base_url: String) -> Router {
     emditor::app_with(
         dir.path().to_path_buf(),
         emditor::Options {
             rewrite: Some(emditor::RewriteConfig {
+                provider,
                 api_key: "test-key".into(),
                 base_url,
                 model: "test-model".into(),
             }),
         },
     )
+}
+
+fn rewrite_request() -> Value {
+    json!({
+        "text": "We should circle back.",
+        "context": "Before it.",
+        "rules": ["“circle back” is on your list of phrases to avoid."],
+    })
+}
+
+fn assert_prompt(prompt: &str) {
+    assert!(prompt.contains("<passage>\nWe should circle back.\n</passage>"));
+    assert!(prompt.contains("<context>\nBefore it.\n</context>"));
+    assert!(prompt.contains("- “circle back” is on your list of phrases to avoid."));
+}
+
+#[tokio::test]
+async fn rewrite_status_names_the_model() {
+    let (dir, _) = setup();
+    let app = rewrite_app(&dir, emditor::Provider::OpenAi, "http://127.0.0.1:9".into());
+    let (status, body) = send(&app, get("/api/rewrite")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, json!({ "available": true, "model": "test-model" }));
 }
 
 #[tokio::test]
@@ -414,18 +450,9 @@ async fn rewrite_sends_the_passage_and_rules_to_claude_and_returns_the_revision(
         "stop_reason": "end_turn",
     });
     let (url, seen) = fake_anthropic((StatusCode::OK, reply)).await;
-    let app = rewrite_app(&dir, url);
+    let app = rewrite_app(&dir, emditor::Provider::Anthropic, url);
 
-    let (status, body) = send(&app, get("/api/rewrite")).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["available"], true);
-
-    let request = json!({
-        "text": "We should circle back.",
-        "context": "Before it.",
-        "rules": ["“circle back” is on your list of phrases to avoid."],
-    });
-    let (status, body) = send(&app, json_request("POST", "/api/rewrite", request)).await;
+    let (status, body) = send(&app, json_request("POST", "/api/rewrite", rewrite_request())).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["text"], "We should talk again.");
 
@@ -433,24 +460,66 @@ async fn rewrite_sends_the_passage_and_rules_to_claude_and_returns_the_revision(
     let (key, sent) = &seen[0];
     assert_eq!(key, "test-key");
     assert_eq!(sent["model"], "test-model");
-    let prompt = sent["messages"][0]["content"].as_str().unwrap();
-    assert!(prompt.contains("<passage>\nWe should circle back.\n</passage>"));
-    assert!(prompt.contains("<context>\nBefore it.\n</context>"));
-    assert!(prompt.contains("- “circle back” is on your list of phrases to avoid."));
+    assert!(sent["system"].as_str().unwrap().contains("<revised>"));
+    assert_prompt(sent["messages"][0]["content"].as_str().unwrap());
 }
 
 #[tokio::test]
-async fn rewrite_reports_a_failed_or_empty_reply() {
+async fn rewrite_sends_the_passage_and_rules_to_openai_and_returns_the_revision() {
     let (dir, _) = setup();
-    let request = json!({ "text": "Hello.", "context": "", "rules": [] });
+    let reply = json!({
+        "status": "completed",
+        "output": [
+            { "type": "reasoning", "summary": [] },
+            { "type": "message", "content": [{ "type": "output_text", "text": "<revised>We should talk again.</revised>" }] },
+        ],
+    });
+    let (url, seen) = fake_openai((StatusCode::OK, reply)).await;
+    let app = rewrite_app(&dir, emditor::Provider::OpenAi, url);
+
+    let (status, body) = send(&app, json_request("POST", "/api/rewrite", rewrite_request())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["text"], "We should talk again.");
+
+    let seen = seen.lock().unwrap();
+    let (auth, sent) = &seen[0];
+    assert_eq!(auth, "Bearer test-key");
+    assert_eq!(sent["model"], "test-model");
+    assert_eq!(sent["reasoning"]["effort"], "low");
+    assert_eq!(sent["store"], false);
+    assert!(sent["instructions"].as_str().unwrap().contains("<revised>"));
+    assert_prompt(sent["input"].as_str().unwrap());
+}
+
+#[tokio::test]
+async fn rewrite_reports_a_failed_or_empty_reply_from_claude() {
+    let (dir, _) = setup();
     for reply in [
         (StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": { "message": "down" } })),
         (StatusCode::OK, json!({ "content": [], "stop_reason": "refusal" })),
         (StatusCode::OK, json!({ "content": [{ "type": "text", "text": "   " }], "stop_reason": "end_turn" })),
     ] {
         let (url, _) = fake_anthropic(reply).await;
-        let app = rewrite_app(&dir, url);
-        let (status, body) = send(&app, json_request("POST", "/api/rewrite", request.clone())).await;
+        let app = rewrite_app(&dir, emditor::Provider::Anthropic, url);
+        let (status, body) = send(&app, json_request("POST", "/api/rewrite", rewrite_request())).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["error"], "rewrite-failed");
+    }
+}
+
+#[tokio::test]
+async fn rewrite_reports_a_failed_refused_or_cut_off_reply_from_openai() {
+    let (dir, _) = setup();
+    let text = |t: &str| json!([{ "type": "message", "content": [{ "type": "output_text", "text": t }] }]);
+    for reply in [
+        (StatusCode::TOO_MANY_REQUESTS, json!({ "error": { "message": "slow down", "type": "rate_limit" } })),
+        (StatusCode::OK, json!({ "status": "completed", "output": [{ "type": "message", "content": [{ "type": "refusal", "refusal": "No." }] }] })),
+        (StatusCode::OK, json!({ "status": "incomplete", "incomplete_details": { "reason": "max_output_tokens" }, "output": text("<revised>half") })),
+        (StatusCode::OK, json!({ "status": "completed", "output": text("  ") })),
+    ] {
+        let (url, _) = fake_openai(reply).await;
+        let app = rewrite_app(&dir, emditor::Provider::OpenAi, url);
+        let (status, body) = send(&app, json_request("POST", "/api/rewrite", rewrite_request())).await;
         assert_eq!(status, StatusCode::BAD_GATEWAY);
         assert_eq!(body["error"], "rewrite-failed");
     }
@@ -459,7 +528,7 @@ async fn rewrite_reports_a_failed_or_empty_reply() {
 #[tokio::test]
 async fn rewrite_refuses_empty_or_very_long_text() {
     let (dir, _) = setup();
-    let app = rewrite_app(&dir, "http://127.0.0.1:9".into());
+    let app = rewrite_app(&dir, emditor::Provider::Anthropic, "http://127.0.0.1:9".into());
     for text in ["  ".to_string(), "a".repeat(20_001)] {
         let (status, body) =
             send(&app, json_request("POST", "/api/rewrite", json!({ "text": text, "context": "", "rules": [] }))).await;

@@ -47,6 +47,6 @@ export const api = {
   readRules: () => request<NotesFile>('/api/rules'),
   writeRules: (content: string, baseModified: number) =>
     request<{ modified: number }>('/api/rules', jsonInit('PUT', { content, baseModified })),
-  rewriteStatus: () => request<{ available: boolean }>('/api/rewrite'),
+  rewriteStatus: () => request<{ available: boolean; model?: string }>('/api/rewrite'),
   rewrite: (body: RewriteRequest) => request<{ text: string }>('/api/rewrite', jsonInit('POST', body)),
 }

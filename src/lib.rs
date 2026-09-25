@@ -3,7 +3,7 @@
 
 mod rewrite;
 
-pub use rewrite::RewriteConfig;
+pub use rewrite::{Provider, RewriteConfig};
 
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
@@ -177,6 +177,9 @@ struct SidecarBody {
 #[derive(Serialize)]
 struct RewriteStatus {
     available: bool,
+    /// The model that rewrites, when rewrites are on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -298,6 +301,7 @@ async fn write_rules(
 async fn rewrite_status(State(state): State<AppState>) -> Json<RewriteStatus> {
     Json(RewriteStatus {
         available: state.rewrite.is_some(),
+        model: state.rewrite.as_ref().map(|config| config.model.clone()),
     })
 }
 

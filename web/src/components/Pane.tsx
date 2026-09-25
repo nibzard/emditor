@@ -4,7 +4,7 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { type CSSProperties, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import { type SaveStatus, useCanRewrite, useDocument, useNotes, useRules } from '../hooks/useDocument'
+import { type SaveStatus, useDocument, useNotes, useRewriteModel, useRules } from '../hooks/useDocument'
 import { contextAround, kindOf, locate, type Note, quoteAt, type TextQuote, wordsAfterCuts } from '../lib/annotations'
 import { type Finding, keep } from '../lib/lint'
 import type { ScrollSync } from '../lib/scrollSync'
@@ -63,7 +63,7 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
   const richRef = useRef<RichHandle | null>(null)
   const [selected, setSelected] = useState(false)
   const rules = useRules()
-  const canRewrite = useCanRewrite()
+  const rewriteModel = useRewriteModel()
   const lintRules = rules.loaded ? rules.rules : null
   const [lintCard, setLintCard] = useState<{ finding: Finding; box: DOMRect } | null>(null)
   const [rulesOpen, setRulesOpen] = useState(false)
@@ -135,14 +135,14 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
     setActive(null)
   }
   // Rewrites are suggestions in the margin, so they need the notes of the document and the formatted text.
-  const rewriteOn = canRewrite && notes.loaded && pane.mode === 'rich'
+  const rewriteOn = Boolean(rewriteModel) && notes.loaded && pane.mode === 'rich'
   const requestRewrite = async (quote: TextQuote, context: string, broken: string[]) => {
     setRewriting(true)
     setRewriteError(null)
     try {
       const { text } = await api.rewrite({ text: quote.exact, context, rules: broken })
       if (text === quote.exact) {
-        setRewriteError('Claude did not change this text.')
+        setRewriteError('The model did not change this text.')
         return false
       }
       const note: Note = { id: crypto.randomUUID(), quote, body: '', created: Date.now(), resolved: false, kind: 'rewrite', replacement: text }
@@ -263,7 +263,7 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
         </button>
         <SaveDot status={status} />
         {doc && pane.mode === 'rich' && (
-          <FormatBar editor={richRef} selected={selected} canMark={Boolean(annotate)} onRewrite={rewriteOn ? rewriteSelection : null} rewriting={rewriting} />
+          <FormatBar editor={richRef} selected={selected} canMark={Boolean(annotate)} onRewrite={rewriteOn ? rewriteSelection : null} rewriteModel={rewriteModel} rewriting={rewriting} />
         )}
         <span className="pane-tools chrome">
           {doc && (
