@@ -8,6 +8,8 @@ A small local Markdown desk for macOS. One Rust binary starts a local server and
 - **Workspace**: write in rich text or Markdown source mode. Open another document beside the current one when you need to compare them, and choose an arrangement from **Arrange**.
 - **Paper desk**: see every Markdown file as an A4 thumbnail. Sort and stack files; open a stack to choose an individual document.
 - **Scroll together**: when several panes are open, scroll them by the same distance.
+- **Notes**: add a note to selected text, highlight it in one of four colors, or suggest a cut. Notes show in the margin; the pane header shows the word count before and after cuts. Notes stay out of the Markdown file, in `.emditor/notes/<path>.json` next to your documents. A note whose text is gone goes to the shelf under the sheet, where you can attach it to other text.
+- **Format bar**: paragraph, headings, lists, bold, italic, links, notes, highlights, and cuts in each pane header. In a narrow pane, the tools that do not fit go into a menu.
 - Rich mode can only make what Markdown can store (CommonMark + GFM tables, task lists, strikethrough).
 - Autosave, a local draft kept until a save succeeds, conflict recovery when a file changes on disk, and print to real A4 pages.
 
@@ -38,11 +40,16 @@ The server listens on 127.0.0.1 only and refuses requests from other hosts, orig
 | ⌥F | Focus mode |
 | ⌘= ⌘− ⌘0 | Zoom the paper in, out, actual size |
 | ⌘/ | Rich text or Markdown source |
+| ⌥⌘M | Add a note to the selected text |
+| ⌥⌘1 – ⌥⌘4 | Highlight: yellow, green, blue, pink |
+| ⌥⌘⌫ | Suggest cutting the selected text |
+| ⌥M | Show or hide notes |
+| ⌘P | Print the focused pane on A4 |
 | ⌥W | Close pane |
 | ⌘S | Save all now |
 | ⌥/ or ? | All shortcuts |
 
-On the desk: arrows move, ↵ opens (⇧↵ in a new pane), space or ⌘-click selects, G stacks, U unstacks, ⌥+arrows reorder, S changes the sort.
+On the desk: arrows move, ↵ opens (⇧↵ in a new pane), space or ⌘-click selects, G stacks, U unstacks, ⌥+arrows reorder, S changes the sort, + and − change the thumbnail size, N makes a new document.
 
 ## Develop
 
