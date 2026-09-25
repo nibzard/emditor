@@ -21,7 +21,14 @@ marked.use({
   },
 })
 
-export function renderPreview(markdown: string, docPath: string): string {
+export function renderPreview(markdown: string, docPath: string, truncated = false): string {
   currentDoc = docPath
-  return marked.parse(markdown) as string
+  let text = markdown
+  if (truncated) {
+    const blockEnd = markdown.lastIndexOf('\n\n')
+    const lineEnd = markdown.lastIndexOf('\n')
+    if (blockEnd > 0) text = markdown.slice(0, blockEnd)
+    else if (lineEnd > 0) text = markdown.slice(0, lineEnd)
+  }
+  return marked.parse(text) as string
 }

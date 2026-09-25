@@ -13,7 +13,7 @@ A small local Markdown desk for macOS. One Rust binary starts a local server and
 - Rich mode can only make what Markdown can store (CommonMark + GFM tables, task lists, strikethrough).
 - Autosave, a local draft kept until a save succeeds, conflict recovery when a file changes on disk, and print to real A4 pages.
 
-Use **New document** to create a file. **Find** (⌘K) opens an existing file. Switching panes or editing modes keeps the same draft. If a save fails or a file changes on disk, the pane shows actions to retry, keep your draft, or load the disk version.
+Use **New document** to create a file. **Find** (⌘K) searches filenames and document contents, including unsaved drafts. A content result opens at its matching line in source mode. Switching panes or editing modes keeps the same draft. If a save fails or a file changes on disk, the pane shows actions to retry, keep your draft, or load the disk version.
 
 ## Use
 
@@ -30,7 +30,7 @@ The server listens on 127.0.0.1 only and refuses requests from other hosts, orig
 
 | Keys | Action |
 | --- | --- |
-| ⌘K | Find a document |
+| ⌘K | Find a document or phrase |
 | ⌥N | New document |
 | ⌥T | Theme: system, light, dark |
 | ⌥0 | Desk or workspace |

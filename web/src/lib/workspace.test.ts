@@ -75,6 +75,11 @@ describe('layout', () => {
 })
 
 describe('close, move, and mode', () => {
+  it('opens a content match in source mode in the selected pane', () => {
+    const w = run({ type: 'open', path: 'a.md', where: 'slot' }, { type: 'openMatch', path: 'b.md', where: 'focused' })
+    expect(w.panes[w.focus]).toMatchObject({ path: 'b.md', mode: 'source' })
+  })
+
   it('closes a pane and shrinks the layout', () => {
     const w = run({ type: 'openMany', paths: ['a.md', 'b.md', 'c.md'] }, { type: 'close', index: 1 })
     expect(w.layout).toBe('cols2')

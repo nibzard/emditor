@@ -7,6 +7,7 @@ import { type SaveStatus, useDocument, useNotes } from '../hooks/useDocument'
 import { kindOf, type Note, type TextQuote, wordsAfterCuts } from '../lib/annotations'
 import type { ScrollSync } from '../lib/scrollSync'
 import { dirOf, titleFromPath } from '../lib/text'
+import { anchorScrollTop, captureViewAnchor, type ViewAnchor } from '../lib/viewportAnchor'
 import type { Mode, PaneState } from '../lib/workspace'
 import { FormatBar } from './FormatBar'
 import { CloseIcon, NotesIcon, RichIcon, SourceIcon, SplitIcon } from './icons'
@@ -22,6 +23,7 @@ type Props = {
   /** The pane is in the top row of the layout, so it starts under the top bar. */
   topRow: boolean
   focusSignal: number
+  searchTarget?: { path: string; line: number; id: number } | null
   sync: ScrollSync
   style: CSSProperties
   onFocus: () => void
@@ -49,7 +51,7 @@ const STATUS_LABEL: Partial<Record<SaveStatus, string>> = {
   conflict: 'Changed on disk',
 }
 
-export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus, onMode, onClose, onPick, onSplit, showNotes, onShowNotes }: Props) {
+export function Pane({ pane, focused, topRow, focusSignal, searchTarget, sync, style, onFocus, onMode, onClose, onPick, onSplit, showNotes, onShowNotes }: Props) {
   const { doc, status, words, edit, reload, keepMine, retry } = useDocument(pane.path)
   const notes = useNotes(pane.path)
   const [active, setActive] = useState<string | null>(null)
@@ -137,6 +139,8 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
   const sectionRef = useRef<HTMLElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [pages, setPages] = useState(1)
+  const visibleAnchor = useRef<ViewAnchor | null>(null)
+  const pendingAnchor = useRef<ViewAnchor | null>(null)
 
   useEffect(() => sync.add(scrollRef.current!), [sync])
 
@@ -149,6 +153,8 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
   const ratio = useRef(0)
   if (lastKey.current !== editorKey) {
     const el = scrollRef.current
+    pendingAnchor.current = el && lastPath.current === doc?.path ? captureViewAnchor(el, lastKey.current) : null
+    visibleAnchor.current = null
     ratio.current =
       el && lastPath.current === doc?.path ? el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight) : 0
     lastKey.current = editorKey
@@ -169,10 +175,44 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
   const onReady = useCallback(() => {
     requestAnimationFrame(() => {
       const el = scrollRef.current
-      if (el) sync.set(el, ratio.current * (el.scrollHeight - el.clientHeight))
+      if (el && !searchTarget) {
+        const anchored = pendingAnchor.current ? anchorScrollTop(el, pendingAnchor.current, editorKey) : null
+        sync.set(el, anchored ?? ratio.current * (el.scrollHeight - el.clientHeight))
+        requestAnimationFrame(() => {
+          if (pendingAnchor.current) {
+            const settled = anchorScrollTop(el, pendingAnchor.current, editorKey)
+            if (settled !== null) sync.set(el, settled)
+          }
+          pendingAnchor.current = null
+          visibleAnchor.current = captureViewAnchor(el, editorKey)
+        })
+      }
       if (focusedRef.current && document.activeElement === document.body) focusEditor()
     })
-  }, [sync, focusEditor])
+  }, [sync, focusEditor, searchTarget, editorKey])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    let frame = 0
+    const capture = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => { visibleAnchor.current = captureViewAnchor(el, editorKey) })
+    }
+    const observer = new ResizeObserver(() => {
+      if (!pendingAnchor.current && visibleAnchor.current && !searchTarget) {
+        const top = anchorScrollTop(el, visibleAnchor.current, editorKey)
+        if (top !== null) sync.set(el, top)
+      }
+      capture()
+    })
+    el.addEventListener('scroll', capture, { passive: true })
+    observer.observe(el)
+    const paper = el.querySelector<HTMLElement>('.paper')
+    if (paper) observer.observe(paper)
+    capture()
+    return () => { el.removeEventListener('scroll', capture); observer.disconnect(); cancelAnimationFrame(frame) }
+  }, [sync, editorKey, searchTarget])
 
   const title = pane.path ? titleFromPath(pane.path) : 'Empty'
   const dir = pane.path ? dirOf(pane.path) : ''
@@ -255,6 +295,7 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
           doc && doc.path === pane.path ? (
             <motion.div
               key={editorKey}
+              data-editor-key={editorKey}
               initial={{ opacity: 0, y: 6, filter: 'blur(3px)' }}
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
               transition={{ duration: 0.32, ease: [0.2, 0.7, 0.1, 1] }}
@@ -273,7 +314,7 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
                       notes={editorNotes} highlight={hover ?? active} onAnnotate={annotate} onAnchors={onAnchors}
                       onActivateNote={setActive} handleRef={richRef} onSelection={setSelected} />
                   ) : (
-                    <SourceEditor initial={editorSeed.current} content={doc.content} onChange={edit} onReady={onReady} />
+                    <SourceEditor initial={editorSeed.current} content={doc.content} onChange={edit} onReady={onReady} revealLine={searchTarget?.line} revealId={searchTarget?.id} />
                   )}
                 </Suspense>
               </Paper>

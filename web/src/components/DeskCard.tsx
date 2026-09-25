@@ -34,8 +34,8 @@ function zoneOf(e: DragEvent<HTMLElement>): DropZone {
   return x < 0.5 ? 'before' : 'after'
 }
 
-const Thumb = memo(function Thumb({ markdown, path }: { markdown: string; path: string }) {
-  const html = useMemo(() => renderPreview(markdown, path), [markdown, path])
+const Thumb = memo(function Thumb({ markdown, path, truncated }: { markdown: string; path: string; truncated: boolean }) {
+  const html = useMemo(() => renderPreview(markdown, path, truncated), [markdown, path, truncated])
   return (
     <div className="thumb">
       <div className="thumb-page md-body" dangerouslySetInnerHTML={{ __html: html }} />
@@ -103,7 +103,7 @@ export function DeskCard(props: Props) {
               <span className="stack-count">{item.files.length}</span>
             </>
           )}
-          <Thumb markdown={top.preview} path={top.path} />
+          <Thumb markdown={top.preview} path={top.path} truncated={top.size > new TextEncoder().encode(top.preview).length} />
           <AnimatePresence>
             {selected && (
               <motion.span
