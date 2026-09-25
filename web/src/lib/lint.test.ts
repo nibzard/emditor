@@ -37,6 +37,7 @@ describe('lint phrases', () => {
     expect(slices(text, found)).toEqual(['Circle back around', 'synergy'])
     expect(found[0].message).toBe('“Circle back around” is on your list of phrases to avoid.')
     expect(found[1].sentence).toBe('Synergyish is fine, synergy is not.')
+    expect(text.slice(found[1].around.from, found[1].around.to)).toBe(found[1].sentence)
   })
 
   it('respects case when asked', () => {

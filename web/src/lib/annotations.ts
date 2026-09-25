@@ -1,5 +1,5 @@
-// ABOUTME: Pure logic for document annotations (notes, highlights, cuts) in a sidecar file next to the Markdown.
-// ABOUTME: Text-quote anchors, anchor recovery after edits, the notes file format, cuts, and margin layout.
+// ABOUTME: Pure logic for document annotations (notes, highlights, cuts, rewrites) in a sidecar file next to the Markdown.
+// ABOUTME: Text-quote anchors, anchor recovery after edits, the notes file format, cuts, rewrite diffs, and margin layout.
 
 import { wordCount } from './text'
 
@@ -10,8 +10,11 @@ export interface TextQuote {
   suffix: string
 }
 
-/** A comment is a margin note, a highlight marks text with a color, and a cut suggests removing the text. */
-export type NoteKind = 'comment' | 'highlight' | 'cut'
+/**
+ * A comment is a margin note, a highlight marks text with a color, a cut suggests removing the text,
+ * and a rewrite suggests replacing the text with its replacement.
+ */
+export type NoteKind = 'comment' | 'highlight' | 'cut' | 'rewrite'
 export const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue', 'pink'] as const
 export type HighlightColor = (typeof HIGHLIGHT_COLORS)[number]
 
@@ -24,6 +27,8 @@ export interface Note {
   /** Not stored for a comment, so that plain notes stay as they are in the file. */
   kind?: NoteKind
   color?: HighlightColor
+  /** The text that a rewrite puts in place of the quote. */
+  replacement?: string
 }
 
 export interface Span {
@@ -31,7 +36,7 @@ export interface Span {
   to: number
 }
 
-const KINDS: NoteKind[] = ['comment', 'highlight', 'cut']
+const KINDS: NoteKind[] = ['comment', 'highlight', 'cut', 'rewrite']
 
 export const kindOf = (note: Note): NoteKind => note.kind ?? 'comment'
 export const colorOf = (note: Note): HighlightColor => note.color ?? 'yellow'
@@ -179,11 +184,16 @@ export function parseNotes(raw: string): Note[] {
   }
   const notes = (data as { notes?: unknown })?.notes
   if (!Array.isArray(notes)) return []
-  return notes.filter(isNote).map(({ id, quote, body, created, resolved, kind, color }) => {
+  return notes.filter(isNote).map(({ id, quote, body, created, resolved, kind, color, replacement }) => {
     const note: Note = { id, quote: { exact: quote.exact, prefix: quote.prefix, suffix: quote.suffix }, body, created, resolved }
     // An unknown kind or color, for example from a newer version, reads as a plain note.
     if (kind !== 'comment' && KINDS.includes(kind as NoteKind)) note.kind = kind
     if (note.kind === 'highlight' && HIGHLIGHT_COLORS.includes(color as HighlightColor)) note.color = color
+    // A rewrite without its replacement cannot be accepted, so it reads as a plain note.
+    if (note.kind === 'rewrite') {
+      if (typeof replacement === 'string') note.replacement = replacement
+      else delete note.kind
+    }
     return note
   })
 }
@@ -230,4 +240,73 @@ export function stackMargin(items: { top: number; height: number }[], gap: numbe
     tops[i] = Math.min(items[i].top, tops[order[k + 1]] - gap - items[i].height)
   }
   return tops
+}
+
+export type DiffPart = { kind: 'same' | 'add' | 'del'; text: string }
+
+/** A word diff (longest common subsequence). The passages are short, so O(n·m) is fine. */
+export function diffWords(a: string, b: string): DiffPart[] {
+  const x = a.match(/\s+|[^\s]+/g) ?? []
+  const y = b.match(/\s+|[^\s]+/g) ?? []
+  if (x.length * y.length > 400_000) return [{ kind: 'del', text: a }, { kind: 'add', text: b }]
+  const dp = Array.from({ length: x.length + 1 }, () => new Uint16Array(y.length + 1))
+  for (let i = x.length - 1; i >= 0; i--) {
+    for (let j = y.length - 1; j >= 0; j--) {
+      dp[i][j] = x[i] === y[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+  const out: DiffPart[] = []
+  const push = (kind: DiffPart['kind'], text: string) => {
+    const last = out[out.length - 1]
+    if (last?.kind === kind) last.text += text
+    else out.push({ kind, text })
+  }
+  let i = 0
+  let j = 0
+  while (i < x.length && j < y.length) {
+    if (x[i] === y[j]) {
+      push('same', x[i++])
+      j++
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) push('del', x[i++])
+    else push('add', y[j++])
+  }
+  while (i < x.length) push('del', x[i++])
+  while (j < y.length) push('add', y[j++])
+  return joinChanges(out)
+}
+
+/** Joins changes that only a space keeps apart, so that "circle back" → "talk again" reads as one change. */
+function joinChanges(parts: DiffPart[]): DiffPart[] {
+  const out: DiffPart[] = []
+  let del = ''
+  let add = ''
+  const flush = () => {
+    if (del) out.push({ kind: 'del', text: del })
+    if (add) out.push({ kind: 'add', text: add })
+    del = ''
+    add = ''
+  }
+  parts.forEach((part, k) => {
+    if (part.kind === 'del') del += part.text
+    else if (part.kind === 'add') add += part.text
+    else if ((del || add) && /^\s+$/.test(part.text) && parts[k + 1] && parts[k + 1].kind !== 'same') {
+      del += part.text
+      add += part.text
+    } else {
+      flush()
+      out.push(part)
+    }
+  })
+  flush()
+  return out
+}
+
+/** The text before and after a span, each side cut to the limit, for a rewrite request. */
+export function contextAround(text: string, { from, to }: Span, limit = 600): string {
+  const before = text.slice(0, from).trim()
+  const after = text.slice(to).trim()
+  const parts: string[] = []
+  if (before) parts.push(`[before] ${before.length > limit ? '…' + before.slice(-limit) : before}`)
+  if (after) parts.push(`[after] ${after.length > limit ? after.slice(0, limit) + '…' : after}`)
+  return parts.join('\n')
 }

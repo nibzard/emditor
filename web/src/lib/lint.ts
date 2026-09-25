@@ -36,6 +36,8 @@ export interface Finding {
   match: string
   /** The sentence around the match, to keep this occurrence and to rewrite it. */
   sentence: string
+  /** Offsets of the sentence in the whole text. */
+  around: { from: number; to: number }
 }
 
 export const RULE_NAMES: Record<RuleKey, string> = {
@@ -165,6 +167,7 @@ export function lint(text: string, blocks: readonly TextBlock[], rules: LintRule
         message: hit.message,
         match: text.slice(block.from + hit.start, block.from + hit.end),
         sentence: body.slice(around.start, Math.max(around.end, hit.end)),
+        around: { from: block.from + around.start, to: block.from + Math.max(around.end, hit.end) },
       }
       if (!kept.has(keptKey(finding))) out.push(finding)
     }

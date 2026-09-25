@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  anchorNotes, colorOf, cutRange, kindOf, locate, mergeNotes, type Note, parseNotes, quoteAt, refreshQuotes, serializeNotes,
+  anchorNotes, colorOf, contextAround, cutRange, diffWords, kindOf, locate, mergeNotes, type Note, parseNotes, quoteAt, refreshQuotes, serializeNotes,
   stackMargin, trimSpan, wordsAfterCuts,
 } from './annotations'
 
@@ -191,6 +191,17 @@ describe('note kinds', () => {
     expect(parseNotes(serializeNotes(notes))).toEqual(notes)
   })
 
+  it('round-trips rewrites with their replacement', () => {
+    const notes = [note('r', TEXT, 4, 7, { kind: 'rewrite', body: '', replacement: 'dog' })]
+    expect(parseNotes(serializeNotes(notes))).toEqual(notes)
+  })
+
+  it('reads a rewrite without a replacement as a plain note', () => {
+    const odd = { ...note('r', TEXT, 4, 7), kind: 'rewrite' }
+    const [read] = parseNotes(JSON.stringify({ version: 1, notes: [odd] }))
+    expect(read).toEqual(note('r', TEXT, 4, 7))
+  })
+
   it('keeps notes with an unknown kind or color as plain notes', () => {
     const odd = { ...note('a', TEXT, 4, 7), kind: 'sticker', color: 'plaid' }
     const [read] = parseNotes(JSON.stringify({ version: 1, notes: [odd] }))
@@ -228,5 +239,32 @@ describe('cutRange', () => {
 
   it('keeps the span when there is no extra space', () => {
     expect(cutRange('abc', { from: 1, to: 2 })).toEqual({ from: 1, to: 2 })
+  })
+})
+
+describe('diffWords', () => {
+  it('gives the words that stay, go, and come, with the spaces kept', () => {
+    expect(diffWords('We should circle back soon.', 'We should talk again soon.')).toEqual([
+      { kind: 'same', text: 'We should ' },
+      { kind: 'del', text: 'circle back' },
+      { kind: 'add', text: 'talk again' },
+      { kind: 'same', text: ' soon.' },
+    ])
+  })
+
+  it('gives one part for the same text', () => {
+    expect(diffWords('a b', 'a b')).toEqual([{ kind: 'same', text: 'a b' }])
+  })
+})
+
+describe('contextAround', () => {
+  it('gives the text before and after a span, marked and cut to the limit', () => {
+    const text = 'aaaa bbbb TARGET cccc dddd'
+    const from = text.indexOf('TARGET')
+    expect(contextAround(text, { from, to: from + 6 }, 6)).toBe('[before] …a bbbb\n[after] cccc d…')
+  })
+
+  it('leaves out an empty side', () => {
+    expect(contextAround('TARGET after', { from: 0, to: 6 })).toBe('[after] after')
   })
 })
