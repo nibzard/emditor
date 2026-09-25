@@ -44,7 +44,7 @@ export function FormatBar({ editor, selected, canMark }: Props) {
   const needs = selected ? undefined : 'Select text first'
 
   // Each group shows in the bar or in the menu, depending on the width of the pane (see the CSS).
-  const groups = (place: 'bar' | 'menu') => <>
+  const groups = (place: 'in-bar' | 'in-menu') => <>
     <span className={`fb-group fb-blocks fb-${place}`}>
       <Tool label="Paragraph" onClick={act((h) => h.format('paragraph'))}><ParagraphIcon /></Tool>
       <Tool label="Heading 1" onClick={act((h) => h.format('heading1'))}><Heading1Icon /></Tool>
@@ -72,10 +72,10 @@ export function FormatBar({ editor, selected, canMark }: Props) {
 
   return (
     <div ref={rootRef} className="format-bar" role="toolbar" aria-label="Formatting">
-      {groups('bar')}
+      {groups('in-bar')}
       <span className="fb-more">
         <Tool label="More formatting" expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><MoreIcon /></Tool>
-        {menuOpen && <div className="fb-menu">{groups('menu')}</div>}
+        {menuOpen && <div className="fb-menu">{groups('in-menu')}</div>}
       </span>
       {linkOpen && (
         <span className="fb-link">
