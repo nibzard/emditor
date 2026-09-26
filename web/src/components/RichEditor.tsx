@@ -1,4 +1,4 @@
-// ABOUTME: Rich (WYSIWYG) editor built on Milkdown with only the CommonMark and GFM schema.
+// ABOUTME: Rich (WYSIWYG) editor built on Milkdown with CommonMark, GFM, and YAML frontmatter.
 // ABOUTME: It can show only what Markdown can store, gives Markdown text back on each change, and marks notes.
 
 // Marks a transaction that brings in text from another pane, so that it is not sent back as an edit.
@@ -24,6 +24,7 @@ import type { EditorView } from '@milkdown/kit/prose/view'
 import { $prose, $view } from '@milkdown/kit/utils'
 import { HIGHLIGHT_COLORS, type HighlightColor, type Note, type NoteKind, type TextQuote } from '../lib/annotations'
 import { resolveAsset } from '../lib/text'
+import { frontmatter } from '../lib/frontmatter'
 import { acceptCuts, type AnchorReport, notesPlugin, selectionQuote, setNotes } from './notesPlugin'
 
 /** What a new annotation on the selection is: a note, a highlight with a color, or a cut. */
@@ -254,6 +255,7 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
       })
       .use(commonmark)
       .use(gfm)
+      .use(frontmatter)
       .use(history)
       .use(listener)
       .use(clipboard)
