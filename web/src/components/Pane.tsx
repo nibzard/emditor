@@ -58,6 +58,22 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
   const [anchors, setAnchors] = useState<{ attached: string[]; detached: string[] }>({ attached: [], detached: [] })
   const richRef = useRef<RichHandle | null>(null)
   const [selected, setSelected] = useState(false)
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle')
+  useEffect(() => setCopyStatus('idle'), [pane.path])
+  useEffect(() => {
+    if (copyStatus === 'idle') return
+    const timer = setTimeout(() => setCopyStatus('idle'), 2000)
+    return () => clearTimeout(timer)
+  }, [copyStatus])
+  const copyPath = async () => {
+    if (!pane.path) return
+    try {
+      await navigator.clipboard.writeText(pane.path)
+      setCopyStatus('copied')
+    } catch {
+      setCopyStatus('error')
+    }
+  }
   const notesOn = showNotes && pane.mode === 'rich' && notes.loaded
   const editorNotes = notesOn ? notes.notes : NO_NOTES
   const byId = useMemo(() => new Map(notes.notes.map((n) => [n.id, n])), [notes.notes])
@@ -194,10 +210,17 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
     >
       <header className="pane-head">
         {focused && <motion.span layoutId="pane-focus" className="pane-focus-mark" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
-        <button className="pane-title" onClick={onPick} title="Open another document here (⌘K)">
-          <span className="pane-title-name">{title}</span>
-          {dir && <span className="pane-title-dir">{dir}</span>}
-        </button>
+        <div className="pane-title" data-tip={copyStatus === 'copied' ? 'Path copied' : copyStatus === 'error' ? 'Could not copy path. Click the name to retry.' : undefined}>
+          <button className="pane-title-name" onClick={pane.path ? () => void copyPath() : onPick}
+            title={pane.path ? `Copy relative path: ${pane.path}` : 'Open a document here (⌘K)'}
+            aria-label={pane.path ? `Copy relative path: ${pane.path}` : 'Open a document here'}>
+            {title}
+          </button>
+          {dir && <button className="pane-title-dir" onClick={onPick} title="Open another document here (⌘K)">{dir}</button>}
+          <span className="visually-hidden" role="status">
+            {copyStatus === 'copied' ? 'Path copied to clipboard' : copyStatus === 'error' ? 'Could not copy path to clipboard' : ''}
+          </span>
+        </div>
         <SaveDot status={status} />
         {doc && pane.mode === 'rich' && <FormatBar editor={richRef} selected={selected} canMark={Boolean(annotate)} />}
         <span className="pane-tools chrome">
