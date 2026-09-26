@@ -10,7 +10,7 @@ A local Markdown desk: a Rust binary (axum) that embeds a React app (web/dist, v
 - `tests/api.rs` — API integration tests against a temp folder.
 - `web/src/lib/` — pure logic with Vitest tests: `desk.ts` (sort/stack), `workspace.ts` (pane reducer, shelf), `layouts.ts`, `scrollSync.ts`, `text.ts`, `annotations.ts` (text-quote anchors, notes file, margin layout), `proseText.ts` (plain text of a ProseMirror doc for anchors).
 - `web/src/hooks/documentStore.ts` — folder-scoped document data, per-path draft and save status, retry/conflict recovery, local draft backup. `hooks/notesStore.ts` — notes per document, delayed saves, merge after conflict. `useDocument.tsx` exposes both stores through context to panes.
-- `web/src/components/` — UI. Rich mode is Milkdown (CommonMark + GFM only); source mode is CodeMirror 6. Both load lazily.
+- `web/src/components/` — UI. Rich mode is Milkdown (CommonMark + GFM + literal YAML frontmatter); source mode is CodeMirror 6. Both load lazily. `web/src/lib/frontmatter.ts` defines the metadata block and its Markdown round trip.
 
 ## Rules
 

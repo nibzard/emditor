@@ -10,7 +10,7 @@ A small local Markdown desk for macOS. One Rust binary starts a local server and
 - **Scroll together**: when several panes are open, scroll them by the same distance.
 - **Notes**: add a note to selected text, highlight it in one of four colors, or suggest a cut. Notes show in the margin; the pane header shows the word count before and after cuts. Notes stay out of the Markdown file, in `.emditor/notes/<path>.json` next to your documents. A note whose text is gone goes to the shelf under the sheet, where you can attach it to other text.
 - **Format bar**: paragraph, headings, lists, bold, italic, links, notes, highlights, and cuts in each pane header. In a narrow pane, the tools that do not fit go into a menu.
-- Rich mode can only make what Markdown can store (CommonMark + GFM tables, task lists, strikethrough).
+- Rich mode can only make what Markdown can store (CommonMark + GFM tables, task lists, strikethrough). YAML frontmatter at the start of a document appears in a labeled, editable metadata block, preserving quotes, lists, indentation, and comments. Press ⌘Enter inside the block to continue writing prose.
 - Autosave, a local draft kept until a save succeeds, conflict recovery when a file changes on disk, and print to real A4 pages.
 
 Use **New document** to create a file. **Find** (⌘K) opens an existing file. Switching panes or editing modes keeps the same draft. If a save fails or a file changes on disk, the pane shows actions to retry, keep your draft, or load the disk version.

@@ -920,13 +920,46 @@ kbd {
   font-size: inherit;
 }
 
+.md-body pre.frontmatter {
+  position: relative;
+  margin-bottom: 2em;
+  padding-top: 2.8em;
+  border: 1px solid var(--line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-variant-numeric: normal;
+}
+
+.md-body pre.frontmatter::before {
+  content: 'Frontmatter';
+  position: absolute;
+  top: 0.8em;
+  left: 1.2em;
+  font-family: var(--sans);
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  pointer-events: none;
+  user-select: none;
+}
+
 .md-body hr {
-  width: 3em;
-  height: 1px;
+  height: auto;
   margin: 2.2em auto;
   border: 0;
-  background: var(--ink);
-  opacity: 0.25;
+  background: none;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1;
+  overflow: visible;
+}
+
+.md-body hr::before {
+  content: '\2042';
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.4em;
 }
 
 .md-body :is(ul, ol) {
