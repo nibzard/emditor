@@ -946,12 +946,20 @@ kbd {
 }
 
 .md-body hr {
-  width: 3em;
-  height: 1px;
+  height: auto;
   margin: 2.2em auto;
   border: 0;
-  background: var(--ink);
-  opacity: 0.25;
+  background: none;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1;
+  overflow: visible;
+}
+
+.md-body hr::before {
+  content: '\2042';
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.4em;
 }
 
 .md-body :is(ul, ol) {
