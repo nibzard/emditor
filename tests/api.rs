@@ -186,6 +186,88 @@ async fn serves_raw_files_next_to_documents() {
 }
 
 #[tokio::test]
+async fn sandboxes_files_that_a_browser_can_run_as_documents() {
+    let (dir, app) = setup();
+    std::fs::write(
+        dir.path().join("page.html"),
+        "<html><body>Local page.</body></html>",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("page.xhtml"),
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>XHTML page.</body></html>",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("art.svg"),
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"4\" height=\"4\"/></svg>",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("feed.xml"),
+        "<feed><title>Feed</title></feed>",
+    )
+    .unwrap();
+
+    for (path, content_type) in [
+        ("page.html", "text/html"),
+        ("page.xhtml", "application/xhtml+xml"),
+        ("art.svg", "image/svg+xml"),
+        ("feed.xml", "text/xml"),
+    ] {
+        let res = app
+            .clone()
+            .oneshot(get(&format!("/files/{path}")))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "path {path:?}");
+        assert_eq!(
+            res.headers()[header::X_CONTENT_TYPE_OPTIONS],
+            "nosniff",
+            "path {path:?}"
+        );
+        assert_eq!(
+            res.headers()[header::CONTENT_SECURITY_POLICY],
+            "sandbox",
+            "path {path:?}"
+        );
+        assert_eq!(
+            res.headers()[header::CONTENT_TYPE],
+            content_type,
+            "path {path:?}"
+        );
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let file = std::fs::read(dir.path().join(path)).unwrap();
+        assert_eq!(&body[..], &file[..], "path {path:?}");
+    }
+}
+
+#[tokio::test]
+async fn serves_passive_files_inline_with_nosniff_only() {
+    let (_dir, app) = setup();
+
+    let res = app
+        .clone()
+        .oneshot(get("/files/notes/image.png"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()[header::CONTENT_TYPE], "image/png");
+    assert_eq!(res.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert!(res.headers().get(header::CONTENT_SECURITY_POLICY).is_none());
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&body[..], &[137, 80, 78, 71][..]);
+
+    let res = app.clone().oneshot(get("/files/alpha.md")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()[header::CONTENT_TYPE], "text/markdown");
+    assert_eq!(res.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert!(res.headers().get(header::CONTENT_SECURITY_POLICY).is_none());
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&body[..], b"# Alpha\n\nFirst.");
+}
+
+#[tokio::test]
 async fn refuses_foreign_hosts_origins_and_cross_site_requests() {
     let (_dir, app) = setup();
 
