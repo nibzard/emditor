@@ -68,7 +68,10 @@ pub fn app_with(root: PathBuf, options: Options) -> Router {
     };
     Router::new()
         .route("/api/files", get(list_files))
-        .route("/api/file", get(read_file).put(write_file).post(create_file))
+        .route(
+            "/api/file",
+            get(read_file).put(write_file).post(create_file),
+        )
         .route("/api/notes", get(read_notes).put(write_notes))
         .route("/api/rules", get(read_rules).put(write_rules))
         .route("/api/rewrite", get(rewrite_status).post(rewrite_passage))
@@ -109,7 +112,10 @@ impl IntoResponse for ApiError {
             ApiError::BadNotes => (StatusCode::BAD_REQUEST, "bad-notes".to_string()),
             ApiError::BadRules => (StatusCode::BAD_REQUEST, "bad-rules".to_string()),
             ApiError::BadRewrite => (StatusCode::BAD_REQUEST, "bad-rewrite".to_string()),
-            ApiError::RewriteUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "rewrite-unavailable".to_string()),
+            ApiError::RewriteUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "rewrite-unavailable".to_string(),
+            ),
             ApiError::RewriteFailed => (StatusCode::BAD_GATEWAY, "rewrite-failed".to_string()),
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not-found".to_string()),
             ApiError::Conflict => (StatusCode::CONFLICT, "conflict".to_string()),
@@ -470,8 +476,8 @@ fn read_preview(path: &Path) -> String {
     use std::io::Read;
 
     let mut buf = Vec::with_capacity(PREVIEW_BYTES);
-    let read = std::fs::File::open(path)
-        .and_then(|f| f.take(PREVIEW_BYTES as u64).read_to_end(&mut buf));
+    let read =
+        std::fs::File::open(path).and_then(|f| f.take(PREVIEW_BYTES as u64).read_to_end(&mut buf));
     if read.is_err() {
         return String::new();
     }
