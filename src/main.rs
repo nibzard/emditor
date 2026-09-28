@@ -54,7 +54,11 @@ fn parse_args() -> Result<Options, String> {
             "--no-open" => open = false,
             "-p" | "--port" => {
                 let value = args.next().ok_or("--port needs a value")?;
-                port = Some(value.parse().map_err(|_| format!("invalid port: {value}"))?);
+                port = Some(
+                    value
+                        .parse()
+                        .map_err(|_| format!("invalid port: {value}"))?,
+                );
             }
             _ if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
             _ if target.is_none() => target = Some(PathBuf::from(arg)),
@@ -99,9 +103,7 @@ async fn main() -> ExitCode {
         }
     };
     let (root, initial_file) = if target.is_file() {
-        let name = target
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned());
+        let name = target.file_name().map(|n| n.to_string_lossy().into_owned());
         (target.parent().map(PathBuf::from).unwrap_or(target), name)
     } else {
         (target, None)
@@ -121,7 +123,10 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let port = listener.local_addr().map(|a| a.port()).unwrap_or(DEFAULT_PORT);
+    let port = listener
+        .local_addr()
+        .map(|a| a.port())
+        .unwrap_or(DEFAULT_PORT);
 
     let mut url = format!("http://127.0.0.1:{port}/");
     if let Some(name) = &initial_file {
@@ -138,7 +143,10 @@ async fn main() -> ExitCode {
         Some(config) => format!("on ({})", config.model),
         None => "off (set ANTHROPIC_API_KEY or OPENAI_API_KEY)".into(),
     };
-    println!("emditor  {}\n         {url}\n         rewrites {rewrites}\n         Ctrl+C to stop", root.display());
+    println!(
+        "emditor  {}\n         {url}\n         rewrites {rewrites}\n         Ctrl+C to stop",
+        root.display()
+    );
 
     if options.open
         && let Err(err) = std::process::Command::new("open").arg(&url).spawn()
@@ -149,9 +157,12 @@ async fn main() -> ExitCode {
     let shutdown = async {
         let _ = tokio::signal::ctrl_c().await;
     };
-    if let Err(err) = axum::serve(listener, emditor::app_with(root, emditor::Options { rewrite }))
-        .with_graceful_shutdown(shutdown)
-        .await
+    if let Err(err) = axum::serve(
+        listener,
+        emditor::app_with(root, emditor::Options { rewrite }),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
     {
         eprintln!("emditor: server error: {err}");
         return ExitCode::FAILURE;
