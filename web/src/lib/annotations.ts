@@ -123,7 +123,8 @@ export function anchorNotes(text: string, notes: Note[]): { attached: AttachedNo
   return { attached, detached }
 }
 
-function sameQuote(a: TextQuote, b: TextQuote): boolean {
+/** Whether two quotes carry the same passage and the same context. */
+export function sameQuote(a: TextQuote, b: TextQuote): boolean {
   return a.exact === b.exact && a.prefix === b.prefix && a.suffix === b.suffix
 }
 
@@ -203,9 +204,20 @@ export function serializeNotes(notes: Note[]): string {
   return JSON.stringify({ version: 1, notes }, null, 2) + '\n'
 }
 
-/** The word count of the document when the given cuts are accepted. */
-export function wordsAfterCuts(words: number, cuts: Note[]): number {
-  return Math.max(0, cuts.reduce((left, cut) => left - wordCount(cut.quote.exact), words))
+/**
+ * The word count of the text when the given cut ranges are accepted. The ranges are joined into one
+ * union first, so two cuts over the same words remove those words once.
+ */
+export function wordsAfterCuts(text: string, cuts: Span[]): number {
+  const ranges = cuts.filter((cut) => cut.to > cut.from).sort((a, b) => a.from - b.from)
+  const kept: string[] = []
+  let at = 0
+  for (const { from, to } of ranges) {
+    if (from > at) kept.push(text.slice(at, from))
+    at = Math.max(at, to)
+  }
+  if (at < text.length) kept.push(text.slice(at))
+  return wordCount(kept.join('\n'))
 }
 
 /**
