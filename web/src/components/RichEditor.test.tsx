@@ -18,6 +18,8 @@ function fakeFolder() {
   const disk = new Map<string, { path: string; content: string; modified: number }>([
     ['a.md', { path: 'a.md', content: 'First line\n', modified: 1 }],
     ['b.md', { path: 'b.md', content: 'Second file\n', modified: 1 }],
+    // Milkdown writes a rule of three stars as three dashes, so this file does not survive a round trip.
+    ['hr.md', { path: 'hr.md', content: 'x\n\n***\ny\n', modified: 1 }],
   ])
   return {
     disk,
@@ -60,6 +62,8 @@ type Mounted = {
   handle: { current: RichHandle | null }
   /** Shows another document in the same place, as a pane does when it is pointed elsewhere. */
   show: (path: string, initial: string, content: string) => Promise<void>
+  /** Renders the same document again with new text from the store. */
+  showAgain: (path: string, initial: string, content: string) => Promise<void>
   /** Takes the editor off the page at once. */
   unmount: () => void
 }
@@ -76,11 +80,10 @@ async function mountEditor(store: DocumentStore): Promise<Mounted> {
   live.push(item)
   let ready!: () => void
   const gate = () => new Promise<void>((resolve) => { ready = resolve })
-  const show = async (path: string, initial: string, content: string) => {
-    const done = gate()
+  const render = (path: string, initial: string, content: string) => {
     // The edit callback is bound to the document of this render, as the pane binds it.
     const edit = (markdown: string) => { store.edit(path, markdown) }
-    await act(async () => {
+    return act(async () => {
       root.render(
         <RichEditor
           docPath={path}
@@ -99,10 +102,16 @@ async function mountEditor(store: DocumentStore): Promise<Mounted> {
         />,
       )
     })
+  }
+  const show = async (path: string, initial: string, content: string) => {
+    const done = gate()
+    await render(path, initial, content)
     // The editor starts on its own after the render; the wait stays outside act, because
     // awaiting a result of the render inside act holds the React work queue back here.
     await done
   }
+  /** Renders the same editor again with new text from the store, as a pane does on each store change. */
+  const showAgain = (path: string, initial: string, content: string) => render(path, initial, content)
   const unmount = () => {
     const at = live.indexOf(item)
     if (at >= 0) {
@@ -110,7 +119,7 @@ async function mountEditor(store: DocumentStore): Promise<Mounted> {
       root.unmount()
     }
   }
-  return { handle, show, unmount }
+  return { handle, show, showAgain, unmount }
 }
 
 afterEach(async () => {
@@ -192,5 +201,52 @@ describe('RichEditor document publication', () => {
 
     expect(test.store.getSnapshot('a.md').doc?.content).toBe('# First line\n')
     expect(test.store.getSnapshot('b.md').doc?.content).toBe('Second file\n')
+  })
+
+  it('sends nothing when a document that Milkdown writes differently is opened and closed without an edit', async () => {
+    const test = setup()
+    await test.open('hr.md')
+    const editor = await mountEditor(test.store)
+    const edit = vi.spyOn(test.store, 'edit')
+    await editor.show('hr.md', 'x\n\n***\ny\n', 'x\n\n***\ny\n')
+
+    await act(() => { editor.unmount() })
+
+    expect(edit).not.toHaveBeenCalled()
+    expect(test.store.getSnapshot('hr.md').doc?.content).toBe('x\n\n***\ny\n')
+    expect(test.backup('hr.md')).toBeUndefined()
+  })
+
+  it('does not send the text back when another pane of the same document brings it in', async () => {
+    const test = setup()
+    await test.open('a.md')
+    const first = await mountEditor(test.store)
+    await first.show('a.md', 'First line\n', 'First line\n')
+    const second = await mountEditor(test.store)
+    await second.show('a.md', 'First line\n', 'First line\n')
+    const edit = vi.spyOn(test.store, 'edit')
+
+    await act(() => { first.handle.current!.format('heading1') })
+    // The second pane learns of the edit from the store, as the app does through its subscription.
+    await second.showAgain('a.md', 'First line\n', '# First line\n')
+
+    expect(edit).toHaveBeenCalledTimes(1)
+    expect(edit).toHaveBeenCalledWith('a.md', '# First line\n')
+    expect(test.store.getSnapshot('a.md').doc?.content).toBe('# First line\n')
+  })
+
+  it('publishes at once but still leaves the write to the debounced save', async () => {
+    const test = setup()
+    await test.open('a.md')
+    const editor = await mountEditor(test.store)
+    await editor.show('a.md', 'First line\n', 'First line\n')
+
+    await act(() => { editor.handle.current!.format('heading1') })
+    expect(test.store.getSnapshot('a.md').doc?.content).toBe('# First line\n')
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(test.folder.client.write).not.toHaveBeenCalled()
+
+    await vi.waitFor(() => expect(test.folder.content('a.md')).toBe('# First line\n'), { timeout: 2000 })
+    await act(() => editor.unmount())
   })
 })
