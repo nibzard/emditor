@@ -1,4 +1,4 @@
-// ABOUTME: Rewrites a passage with Claude (Anthropic Messages API) or an OpenAI model (Responses API), only when asked.
+// ABOUTME: Rewrites a passage with an OpenAI model (Responses API) or Claude (Anthropic Messages API), only when asked.
 // ABOUTME: The API key stays on the server; without a key the rewrite endpoint is off.
 
 use serde::Deserialize;
@@ -46,7 +46,7 @@ impl RewriteConfig {
     }
 
     /// Reads the settings through `var`. `EMDITOR_REWRITE_PROVIDER` (`anthropic` or `openai`) selects the API;
-    /// without it, the API is the first one that has a key: `ANTHROPIC_API_KEY`, then `OPENAI_API_KEY`.
+    /// without it, the API is the first one that has a key: `OPENAI_API_KEY`, then `ANTHROPIC_API_KEY`.
     /// `EMDITOR_REWRITE_MODEL`, `ANTHROPIC_BASE_URL`, and `OPENAI_BASE_URL` change the defaults.
     /// Gives None when there is no key, and an error for an unknown provider or a selected provider without a key.
     pub fn from_vars(var: impl Fn(&str) -> Option<String>) -> Result<Option<Self>, String> {
@@ -55,8 +55,8 @@ impl RewriteConfig {
             Some("anthropic") => Provider::Anthropic,
             Some("openai") => Provider::OpenAi,
             Some(other) => return Err(format!("unknown EMDITOR_REWRITE_PROVIDER: {other} (use anthropic or openai)")),
-            None if get("ANTHROPIC_API_KEY").is_some() => Provider::Anthropic,
             None if get("OPENAI_API_KEY").is_some() => Provider::OpenAi,
+            None if get("ANTHROPIC_API_KEY").is_some() => Provider::Anthropic,
             None => return Ok(None),
         };
         let (key_var, url_var, url, model) = match provider {
@@ -237,14 +237,23 @@ mod tests {
     }
 
     #[test]
-    fn picks_the_first_provider_with_a_key_and_its_defaults() {
+    fn picks_openai_first_then_anthropic_with_their_defaults() {
         let both = config(&[("ANTHROPIC_API_KEY", "a"), ("OPENAI_API_KEY", "o")]).unwrap().unwrap();
-        assert_eq!((both.provider, both.model.as_str(), both.base_url.as_str()), (Provider::Anthropic, ANTHROPIC_MODEL, ANTHROPIC_BASE_URL));
-        let openai = config(&[("OPENAI_API_KEY", "o")]).unwrap().unwrap();
         assert_eq!(
-            openai,
+            both,
             RewriteConfig { provider: Provider::OpenAi, api_key: "o".into(), base_url: OPENAI_BASE_URL.into(), model: OPENAI_MODEL.into() }
         );
+        let anthropic = config(&[("ANTHROPIC_API_KEY", "a")]).unwrap().unwrap();
+        assert_eq!(
+            (anthropic.provider, anthropic.model.as_str(), anthropic.base_url.as_str()),
+            (Provider::Anthropic, ANTHROPIC_MODEL, ANTHROPIC_BASE_URL)
+        );
+    }
+
+    #[test]
+    fn the_provider_can_select_anthropic_when_both_keys_are_set() {
+        let set = config(&[("ANTHROPIC_API_KEY", "a"), ("OPENAI_API_KEY", "o"), ("EMDITOR_REWRITE_PROVIDER", "anthropic")]);
+        assert_eq!(set.unwrap().unwrap().provider, Provider::Anthropic);
     }
 
     #[test]

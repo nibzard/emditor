@@ -21,10 +21,10 @@ OPTIONS:
     -V, --version       Show the version
 
 ENVIRONMENT:
-    ANTHROPIC_API_KEY         Turns on rewrites with Claude (Anthropic Messages API)
     OPENAI_API_KEY            Turns on rewrites with OpenAI (Responses API)
-    EMDITOR_REWRITE_PROVIDER  anthropic or openai (default: the first with a key)
-    EMDITOR_REWRITE_MODEL     The model (default: claude-opus-5-5 or gpt-6-sol)
+    ANTHROPIC_API_KEY         Turns on rewrites with Claude (Anthropic Messages API)
+    EMDITOR_REWRITE_PROVIDER  openai or anthropic (default: openai when it has a key)
+    EMDITOR_REWRITE_MODEL     The model (default: gpt-6-sol or claude-opus-5-5)
     ANTHROPIC_BASE_URL        Default: https://api.anthropic.com
     OPENAI_BASE_URL           Default: https://api.openai.com/v1
     Without a key, rewrites are off.
@@ -136,7 +136,7 @@ async fn main() -> ExitCode {
     };
     let rewrites = match &rewrite {
         Some(config) => format!("on ({})", config.model),
-        None => "off (set ANTHROPIC_API_KEY or OPENAI_API_KEY)".into(),
+        None => "off (set OPENAI_API_KEY or ANTHROPIC_API_KEY)".into(),
     };
     println!("emditor  {}\n         {url}\n         rewrites {rewrites}\n         Ctrl+C to stop", root.display());
 
