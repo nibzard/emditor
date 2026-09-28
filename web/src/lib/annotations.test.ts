@@ -101,6 +101,7 @@ describe('parseNotes and serializeNotes', () => {
     expect(parseNotes('{not json')).toEqual({ notes: null, error: 'malformed' })
     expect(parseNotes('null')).toEqual({ notes: null, error: 'malformed' })
     expect(parseNotes('123')).toEqual({ notes: null, error: 'malformed' })
+    expect(parseNotes('[]')).toEqual({ notes: null, error: 'malformed' })
     expect(parseNotes('{"version":1,"notes":"x"}')).toEqual({ notes: null, error: 'malformed' })
   })
 
@@ -202,6 +203,10 @@ describe('mergeNotes', () => {
 
   it('keeps a removal here for a note that disk changed, because the removal was the last choice here', () => {
     expect(mergeNotes(base, [a, { ...b, body: 'theirs' }], [a]).map((n) => n.id)).toEqual(['a'])
+  })
+
+  it('keeps a note away that both sides removed', () => {
+    expect(mergeNotes(base, [a], [a]).map((n) => n.id)).toEqual(['a'])
   })
 
   it('keeps notes that each side added', () => {

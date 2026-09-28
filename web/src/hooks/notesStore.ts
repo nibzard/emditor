@@ -2,7 +2,7 @@
 // ABOUTME: It merges against the loaded state after a conflict, and a notes file it cannot read stays as it is.
 
 import { api, ApiError } from '../api'
-import { mergeNotes, type Note, type NotesFileError, parseNotes, serializeNotes, type TextQuote } from '../lib/annotations'
+import { type LoadedNotes, mergeNotes, type Note, type NotesFileError, parseNotes, serializeNotes, type TextQuote } from '../lib/annotations'
 
 export type NotesStatus = 'idle' | 'saving' | 'saved' | 'error'
 /** Why the notes of a document could not be read: the read failed, or the file cannot be read as notes. */
@@ -66,13 +66,20 @@ export class NotesStore {
     return entry
   }
 
+  /**
+   * Reads what the server gave for the notes file. A missing file has empty content and modified 0, and is a
+   * valid empty list. Any other content that does not parse keeps the file as it is, because a write could
+   * destroy it.
+   */
+  private parseDisk(content: string, modified: number): LoadedNotes {
+    return content === '' && modified === 0 ? { notes: [], error: null } : parseNotes(content)
+  }
+
   private async load(entry: Entry) {
     entry.reading += 1
     try {
       const disk = await this.client.readNotes(entry.path)
-      // The server tells a document without a notes file apart with empty content and modified 0.
-      // Any other content that does not parse keeps the file as it is, because a write could destroy it.
-      const parsed = disk.content === '' && disk.modified === 0 ? { notes: [] as Note[], error: null } : parseNotes(disk.content)
+      const parsed = this.parseDisk(disk.content, disk.modified)
       if (parsed.error) {
         entry.loadError = parsed.error
         this.publish(entry, 'error')
@@ -83,7 +90,7 @@ export class NotesStore {
       entry.baseModified = disk.modified
       entry.loaded = true
       entry.loadError = null
-      this.publish(entry)
+      this.publish(entry, entry.revision > entry.acknowledged ? 'saving' : 'idle')
       if (entry.revision > entry.acknowledged) await this.save(entry.path)
     } catch (err) {
       console.error(`emditor: cannot load the notes of ${entry.path}`, err)
@@ -160,10 +167,13 @@ export class NotesStore {
     if (entry.revision <= entry.acknowledged) return
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const revision = entry.revision
+      // The notes that go into this write are also the base of the next merge. A change that lands while the
+      // write is in flight is not on disk yet, so it must not become the base.
+      const written = entry.notes
       try {
-        const saved = await this.client.writeNotes(entry.path, serializeNotes(entry.notes), entry.baseModified)
+        const saved = await this.client.writeNotes(entry.path, serializeNotes(written), entry.baseModified)
         entry.baseModified = saved.modified
-        entry.base = entry.notes
+        entry.base = written
         entry.acknowledged = Math.max(entry.acknowledged, revision)
         this.publish(entry, entry.revision > entry.acknowledged ? 'saving' : 'saved')
         if (entry.revision > entry.acknowledged) void this.save(entry.path)
@@ -172,7 +182,7 @@ export class NotesStore {
         if (err instanceof ApiError && err.code === 'conflict' && attempt < MAX_ATTEMPTS) {
           try {
             const disk = await this.client.readNotes(entry.path)
-            const parsed = parseNotes(disk.content)
+            const parsed = this.parseDisk(disk.content, disk.modified)
             if (parsed.error) {
               entry.loadError = parsed.error
               this.publish(entry, 'error')
@@ -210,7 +220,7 @@ export class NotesStore {
       try {
         const disk = await this.client.readNotes(entry.path)
         if (entry.revision !== revision || entry.pending > 0 || disk.modified === entry.baseModified) return
-        const parsed = parseNotes(disk.content)
+        const parsed = this.parseDisk(disk.content, disk.modified)
         if (parsed.error) {
           // The notes that are here stay as they are, and nothing is written over the damaged file.
           entry.loadError = parsed.error

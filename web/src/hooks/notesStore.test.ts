@@ -33,6 +33,8 @@ function setup(initial: Note[] = []) {
     /** Puts bytes on the file that emditor did not write, the way a damaged or newer file gets there. */
     damage: (content: string) => { disk = { content, modified: disk.modified + 7 } },
     otherWriter: (notes: Note[]) => { disk = { content: serializeNotes(notes), modified: disk.modified + 1 } },
+    /** Removes the sidecar the way another writer can, so the server reports it as missing. */
+    removeFile: () => { disk = { content: '', modified: 0 } },
   }
 }
 
@@ -234,5 +236,76 @@ describe('NotesStore', () => {
     await test.store.save('a.md')
     expect(test.client.writeNotes).not.toHaveBeenCalled()
     expect(test.diskBytes()).toBe('{not json')
+  })
+
+  it('keeps a damaged file as it is when a save meets the damage in a conflict', async () => {
+    const test = setup([makeNote('a')])
+    await test.open()
+    test.store.update('a.md', 'a', { body: 'mine' })
+    test.damage('{not json')
+    await test.store.save('a.md')
+    expect(test.store.getSnapshot('a.md').loadError).toBe('malformed')
+    expect(test.client.writeNotes).toHaveBeenCalledTimes(1)
+    expect(test.diskBytes()).toBe('{not json')
+  })
+
+  it('treats a notes file that another writer removed as empty when it saves', async () => {
+    const test = setup([makeNote('a'), makeNote('b')])
+    await test.open()
+    test.store.update('a.md', 'a', { body: 'mine a' })
+    test.removeFile()
+    await test.store.save('a.md')
+    const snapshot = test.store.getSnapshot('a.md')
+    expect(snapshot.loadError).toBe(null)
+    expect(snapshot.status).toBe('saved')
+    expect(test.diskNotes().map((n) => n.id)).toEqual(['a'])
+    expect(test.diskNotes().find((n) => n.id === 'a')?.body).toBe('mine a')
+  })
+
+  it('takes a notes file that another writer removed as empty notes on a refresh', async () => {
+    const test = setup([makeNote('a')])
+    await test.open()
+    test.removeFile()
+    await test.store.refresh()
+    const snapshot = test.store.getSnapshot('a.md')
+    expect(snapshot.loadError).toBe(null)
+    expect(snapshot.notes).toEqual([])
+  })
+
+  it('clears the error state after a retried load succeeds and nothing waits to save', async () => {
+    const test = setup([makeNote('a')])
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    test.client.readNotes.mockRejectedValueOnce(new ApiError('boom', 500))
+    test.store.subscribe('a.md', () => {})
+    await vi.waitFor(() => expect(test.store.getSnapshot('a.md').loadError).toBe('read-failed'))
+    await test.store.retry('a.md')
+    const snapshot = test.store.getSnapshot('a.md')
+    expect(snapshot.loaded).toBe(true)
+    expect(snapshot.loadError).toBe(null)
+    expect(snapshot.status).toBe('idle')
+  })
+
+  it('keeps a change made while a write was in flight when the next save meets a conflict', async () => {
+    const test = setup([makeNote('a')])
+    await test.open()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const plain = test.client.writeNotes.getMockImplementation()!
+    test.client.writeNotes.mockImplementationOnce(async (path: string, content: string, base: number) => {
+      const saved = await plain(path, content, base)
+      await gate
+      return saved
+    })
+    test.store.update('a.md', 'a', { body: 'mine' })
+    const first = test.store.save('a.md')
+    await vi.waitFor(() => expect(test.diskNotes().find((n) => n.id === 'a')?.body).toBe('mine'))
+    test.store.update('a.md', 'a', { body: 'mine 2' })
+    test.otherWriter([makeNote('a', 'theirs')])
+    release()
+    await first
+    await test.store.save('a.md')
+    expect(test.diskNotes().find((n) => n.id === 'a')?.body).toBe('mine 2')
+    expect(test.store.getSnapshot('a.md').status).toBe('saved')
+    expect(test.store.hasUnsettled()).toBe(false)
   })
 })

@@ -222,7 +222,7 @@ export function parseNotes(raw: string): LoadedNotes {
   } catch {
     return { notes: null, error: 'malformed' }
   }
-  if (typeof data !== 'object' || data === null) return { notes: null, error: 'malformed' }
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return { notes: null, error: 'malformed' }
   const file = data as { version?: unknown; notes?: unknown }
   if (file.version !== 1) return { notes: null, error: 'unsupported-version' }
   if (!Array.isArray(file.notes)) return { notes: null, error: 'malformed' }
