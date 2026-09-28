@@ -29,7 +29,7 @@ import { resolveAsset } from '../lib/text'
 import { api } from '../api'
 import type { SemanticFinding, SemanticStatus } from '../lib/semanticScheduler'
 import { LINT, lintPlugin, setLintRules } from './lintPlugin'
-import { SEMANTIC, type SemanticConfig, semanticPlugin, setSemanticConfig } from './semanticPlugin'
+import { findingsAt, SEMANTIC, type SemanticConfig, semanticPlugin, setSemanticConfig } from './semanticPlugin'
 import { acceptCuts, acceptRewrite, type AnchorReport, notesPlugin, selectionQuote, setNotes } from './notesPlugin'
 
 /** What a new annotation on the selection is: a note, a highlight with a color, or a cut. */
@@ -78,8 +78,8 @@ type Props = {
   /** The semantic rules for Jev; null turns them off. */
   semantic: SemanticConfig
   onSemanticStatus: (status: SemanticStatus) => void
-  /** Called with the semantic finding under a click in the text, and the box of its mark. */
-  onSemantic: (finding: SemanticFinding, box: DOMRect) => void
+  /** Called with the semantic findings under a click in the text, the most specific first, and the box of the mark. */
+  onSemantic: (findings: SemanticFinding[], box: DOMRect) => void
 }
 
 export function RichEditor({ docPath, initial, content, onChange, onReady, notes, highlight, onAnnotate, onAnchors, onActivateNote, handleRef, onSelection, lintRules, onLint, semantic, onSemanticStatus, onSemantic }: Props) {
@@ -280,8 +280,11 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
       const semanticMark = (e.target as HTMLElement).closest<HTMLElement>('[data-semantic]')
       if (semanticMark && !mark && editor) {
         editor.action((ctx) => {
-          const finding = SEMANTIC.getState(ctx.get(editorViewCtx).state)?.findings[Number(semanticMark.dataset.semantic)]
-          if (finding) onSemanticRef.current(finding, semanticMark.getBoundingClientRect())
+          const view = ctx.get(editorViewCtx)
+          const pos = view.posAtCoords({ left: e.clientX, top: e.clientY })?.pos
+          if (pos === undefined) return
+          const found = findingsAt(SEMANTIC.getState(view.state)?.findings ?? [], docText(view.state.doc).toOffset(pos))
+          if (found.length) onSemanticRef.current(found, semanticMark.getBoundingClientRect())
         })
       }
     }

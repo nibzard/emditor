@@ -1,6 +1,12 @@
 # Plan: semantic writing rules with TypeSafe Jev
 
-Status: proposal. Nothing in this plan is built yet.
+Status: built (steps 1–7). The items under "Later" are not built.
+
+Differences from the plan:
+
+- Passage and section findings have a dotted line under the text of each paragraph, not a block style with a marker.
+- The cache key has the configured model, not the model of the reply. The cache is in memory, so a restart clears it.
+- Marks of findings that overlap are one element in the page, so a click finds its findings by position. The card shows "1 of 2 · Next" when there are more.
 
 ## Goal
 

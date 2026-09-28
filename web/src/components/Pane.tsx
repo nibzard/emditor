@@ -74,7 +74,7 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
     [jevModel, rules.loaded, rules.rules, pane.mode],
   )
   const [semanticStatus, setSemanticStatus] = useState<SemanticStatus>('idle')
-  type Card = { kind: 'exact'; finding: Finding; box: DOMRect } | { kind: 'semantic'; finding: SemanticFinding; box: DOMRect }
+  type Card = { kind: 'exact'; finding: Finding; box: DOMRect } | { kind: 'semantic'; findings: SemanticFinding[]; index: number; box: DOMRect }
   const [lintCard, setLintCard] = useState<Card | null>(null)
   const [rulesOpen, setRulesOpen] = useState(false)
   const [rewriting, setRewriting] = useState(false)
@@ -370,12 +370,18 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
           <LintCard title={RULE_NAMES[lintCard.finding.rule]} message={lintCard.finding.message} box={lintCard.box} rewriting={rewriting}
             onRewrite={rewriteOn ? () => void rewriteFinding(lintCard.finding) : null}
             onKeep={() => keepFinding(lintCard.finding)} onRules={openRules} onClose={closeCard} />
-        ) : (
-          <LintCard title={lintCard.finding.name} message={lintCard.finding.message} box={lintCard.box} rewriting={rewriting}
-            detail={`Jev: ${Math.round(lintCard.finding.probability * 100)}% · shows at ${Math.round(lintCard.finding.threshold * 100)}%`}
-            onRewrite={rewriteOn && lintCard.finding.ranges.length === 1 ? () => void rewriteSemantic(lintCard.finding) : null}
-            onKeep={() => keepSemantic(lintCard.finding)} onAllow={() => allowSemantic(lintCard.finding)} onRules={openRules} onClose={closeCard} />
-        )
+        ) : (() => {
+          const { findings, index, box } = lintCard
+          const finding = findings[index]
+          const next = findings.length > 1 ? () => setLintCard({ ...lintCard, index: (index + 1) % findings.length }) : undefined
+          return (
+            <LintCard key={finding.key} title={finding.name} message={finding.message} box={box} rewriting={rewriting}
+              detail={`Jev: ${Math.round(finding.probability * 100)}% · shows at ${Math.round(finding.threshold * 100)}%`}
+              position={findings.length > 1 ? `${index + 1} of ${findings.length}` : undefined} onNext={next}
+              onRewrite={rewriteOn && finding.ranges.length === 1 ? () => void rewriteSemantic(finding) : null}
+              onKeep={() => keepSemantic(finding)} onAllow={() => allowSemantic(finding)} onRules={openRules} onClose={closeCard} />
+          )
+        })()
       )}
 
       <div className="pane-scroll" ref={scrollRef}>
@@ -403,7 +409,7 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
                       onActivateNote={setActive} handleRef={richRef} onSelection={setSelected}
                       lintRules={lintRules} onLint={(finding, box) => setLintCard({ kind: 'exact', finding, box })}
                       semantic={semantic} onSemanticStatus={setSemanticStatus}
-                      onSemantic={(finding, box) => setLintCard({ kind: 'semantic', finding, box })} />
+                      onSemantic={(findings, box) => setLintCard({ kind: 'semantic', findings, index: 0, box })} />
                   ) : (
                     <SourceEditor initial={editorSeed.current} content={doc.content} onChange={edit} onReady={onReady} lintRules={lintRules} />
                   )}

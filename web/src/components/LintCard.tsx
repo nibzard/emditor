@@ -20,11 +20,14 @@ type Props = {
   onAllow?: () => void
   onRules: () => void
   onClose: () => void
+  /** For one of several findings at the same text, for example "1 of 2", with a way to the next one. */
+  position?: string
+  onNext?: () => void
 }
 
 const WIDTH = 280
 
-export function LintCard({ title, message, detail, box, onRewrite, rewriting, onKeep, onAllow, onRules, onClose }: Props) {
+export function LintCard({ title, message, detail, box, onRewrite, rewriting, onKeep, onAllow, onRules, onClose, position, onNext }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
@@ -52,7 +55,10 @@ export function LintCard({ title, message, detail, box, onRewrite, rewriting, on
 
   return createPortal(
     <div ref={ref} className="lint-card" role="dialog" aria-label={title} style={{ ...style, width: WIDTH }}>
-      <p className="lint-card-rule">{title}</p>
+      <p className="lint-card-rule">
+        {title}
+        {position && onNext && <button type="button" className="lint-card-next" onClick={onNext}>{position} · Next</button>}
+      </p>
       <p className="lint-card-message">{message}</p>
       {detail && <p className="lint-card-detail">{detail}</p>}
       <footer className="lint-card-actions">

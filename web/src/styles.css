@@ -2707,3 +2707,29 @@ select:focus-visible {
   align-self: flex-start;
   margin-left: -10px;
 }
+
+/* Where a sentence finding and a passage finding overlap, the sentence line shows. */
+.lint-semantic.lint-scope-sentence {
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1px;
+}
+
+.lint-card-rule {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lint-card-next {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.lint-card-next:hover {
+  color: var(--accent-ink);
+}

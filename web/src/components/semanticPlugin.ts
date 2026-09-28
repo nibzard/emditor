@@ -16,6 +16,18 @@ type Meta = { config: SemanticConfig } | { findings: SemanticFinding[]; forText:
 
 export const SEMANTIC = new PluginKey<State>('emditor-semantic')
 
+const SCOPE_ORDER = { sentence: 0, passage: 1, section: 2 }
+
+/**
+ * The findings at a text offset, the most specific scope first. Marks of findings that overlap are one element
+ * in the page, so a click finds its findings by position, not by element.
+ */
+export function findingsAt(findings: readonly SemanticFinding[], offset: number): SemanticFinding[] {
+  return findings
+    .filter((f) => f.ranges.some((r) => r.from <= offset && offset < r.to))
+    .sort((a, b) => SCOPE_ORDER[a.scope] - SCOPE_ORDER[b.scope])
+}
+
 /** Sets the findings of the scheduler. They apply only when `forText` is the current plain text. */
 export function setSemanticFindings(tr: Transaction, findings: SemanticFinding[], forText: string) {
   return tr.setMeta(SEMANTIC, { findings, forText } satisfies Meta).setMeta('addToHistory', false)
@@ -39,13 +51,13 @@ export function semanticState(
         if (meta && 'findings' in meta) {
           const map = docText(state.doc)
           if (map.text !== meta.forText) return value
-          const decorations = meta.findings.flatMap((f, i) =>
+          const decorations = meta.findings.flatMap((f) =>
             f.ranges
               .filter((r) => r.to > r.from)
               .map((r) =>
                 Decoration.inline(map.toPos(r.from, 'start'), map.toPos(r.to, 'end'), {
                   class: `lint-mark lint-semantic lint-scope-${f.scope}`,
-                  'data-semantic': String(i),
+                  'data-semantic': '',
                 }),
               ),
           )

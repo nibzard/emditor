@@ -489,6 +489,7 @@ async fn rewrite_sends_the_passage_and_rules_to_openai_and_returns_the_revision(
     assert_eq!(sent["reasoning"]["effort"], "low");
     assert_eq!(sent["store"], false);
     assert!(sent["instructions"].as_str().unwrap().contains("<revised>"));
+    assert!(sent["instructions"].as_str().unwrap().contains("never copy, move, or repeat text from the context"));
     assert_prompt(sent["input"].as_str().unwrap());
 }
 

@@ -11,6 +11,7 @@ A small local Markdown desk for macOS. One Rust binary starts a local server and
 - **Notes**: add a note to selected text, highlight it in one of four colors, or suggest a cut. Notes show in the margin; the pane header shows the word count before and after cuts. Notes stay out of the Markdown file, in `.emditor/notes/<path>.json` next to your documents. A note whose text is gone goes to the shelf under the sheet, where you can attach it to other text.
 - **Format bar**: paragraph, headings, lists, bold, italic, links, notes, highlights, cuts, and rewrites in each pane header. In a narrow pane, the tools that do not fit go into a menu.
 - **Writing rules**: a wavy line marks phrases that you want to avoid, a word that occurs two times in a row, and (when you turn it on) sentences longer than your limit. The checks run in the browser while you type, in rich and source mode, and never change the file. Click a mark to keep that occurrence or to ask for a rewrite. Set the rules for the folder in **Writing rules** in the pane header; they stay in `.emditor/rules.json`.
+- **Semantic rules with Jev**: rules that code cannot check, such as *Avoid LinkedIn voice*, *Not marketing copy*, *Concrete over vague*, and *Don't explain it twice*. When the server has a `TYPESAFE_API_KEY`, turn a rule on in **Writing rules**. After a pause in typing, Jev (TypeSafe) checks each sentence, passage, or section, and a mark shows where it is likely that the text breaks the rule. The card shows the probability and gives **Keep this**, **Allow writing like this** (the text becomes an example of the rule), and **Rewrite**. You can edit the presets and add your own rules. Each rule starts off, because each check sends text to TypeSafe. Semantic rules work in formatted text.
 - **Rewrites with OpenAI or Claude**: when the server has an `OPENAI_API_KEY` or an `ANTHROPIC_API_KEY`, select text (or click a mark) and choose **Rewrite**. The rewrite shows in the margin as a word diff; nothing changes until you accept it. Without a key, rewrites are off and no text goes out of your computer.
 - Rich mode can only make what Markdown can store (CommonMark + GFM tables, task lists, strikethrough).
 - Autosave, a local draft kept until a save succeeds, conflict recovery when a file changes on disk, and print to real A4 pages.
@@ -27,9 +28,12 @@ emditor --port 5000 --no-open
 OPENAI_API_KEY=sk-... emditor                             # rewrites with OpenAI
 OPENAI_API_KEY=sk-... EMDITOR_REWRITE_MODEL=gpt-6-astra emditor
 ANTHROPIC_API_KEY=sk-ant-... emditor                      # rewrites with Claude
+TYPESAFE_API_KEY=... emditor                              # semantic rules with Jev
 ```
 
 With `OPENAI_API_KEY`, rewrites use `gpt-6-luna` through the Responses API (`gpt-6-sol` and `gpt-6-astra` also work). Otherwise, with `ANTHROPIC_API_KEY`, they use `claude-opus-5-5` through the Messages API. When both keys are set, `EMDITOR_REWRITE_PROVIDER=anthropic` selects Claude. `EMDITOR_REWRITE_MODEL` sets the model. Only the passage, some text around it, and the rules that it breaks go to the API, and only when you ask for a rewrite. OpenAI requests are sent with `store: false`.
+
+Semantic rules use `jev-1.13.0`, the model that the thresholds of the presets are for. Set `EMDITOR_JEV_MODEL` to use a different model, for example `jev-latest`. Only the text of the targets of the rules that you turn on goes to TypeSafe, with some text around each target. The server keeps answers in memory to send each text only once, and it does not log the text.
 
 The server listens on 127.0.0.1 only and refuses requests from other hosts, origins, and cross-site pages.
 
