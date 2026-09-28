@@ -1,8 +1,10 @@
 // ABOUTME: Core of emditor. It builds the HTTP router that serves the embedded web app
-// ABOUTME: and the JSON API for the Markdown files of one folder, their notes, the folder's writing rules, and rewrites.
+// ABOUTME: and the JSON API for the Markdown files of one folder, their notes, the folder's writing rules, Jev checks, and rewrites.
 
+mod jev;
 mod rewrite;
 
+pub use jev::JevConfig;
 pub use rewrite::{Provider, RewriteConfig};
 
 use std::io::ErrorKind;
@@ -10,11 +12,11 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
-use axum::extract::{Path as UrlPath, Query, Request, State};
+use axum::extract::{DefaultBodyLimit, Path as UrlPath, Query, Request, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -32,6 +34,8 @@ const NOTES_DIR: &[&str] = &[".emditor", "notes"];
 /// Folder in the root that keeps the writing rules of the whole folder.
 const RULES_DIR: &[&str] = &[".emditor"];
 const RULES_FILE: &str = "rules.json";
+/// Upper limit of the body of a Jev check.
+const MAX_CHECK_BYTES: usize = 256 * 1024;
 /// Upper limit of characters in a passage to rewrite.
 const MAX_REWRITE_CHARS: usize = 20_000;
 
@@ -43,6 +47,7 @@ struct Assets;
 struct AppState {
     root: Arc<PathBuf>,
     rewrite: Option<Arc<RewriteConfig>>,
+    jev: Option<Arc<jev::Jev>>,
     http: reqwest::Client,
 }
 
@@ -51,6 +56,8 @@ struct AppState {
 pub struct Options {
     /// How to reach Claude for rewrites. None turns rewrites off.
     pub rewrite: Option<RewriteConfig>,
+    /// How to reach Jev for semantic rules. None turns them off.
+    pub jev: Option<JevConfig>,
 }
 
 /// Makes the router for one root folder, with rewrites off. All file access stays inside this folder.
@@ -61,10 +68,12 @@ pub fn app(root: PathBuf) -> Router {
 /// Makes the router for one root folder with the given options.
 pub fn app_with(root: PathBuf, options: Options) -> Router {
     let root = root.canonicalize().unwrap_or(root);
+    let http = reqwest::Client::new();
     let state = AppState {
         root: Arc::new(root),
         rewrite: options.rewrite.map(Arc::new),
-        http: reqwest::Client::new(),
+        jev: options.jev.map(|config| Arc::new(jev::Jev::new(config, http.clone()))),
+        http,
     };
     Router::new()
         .route("/api/files", get(list_files))
@@ -72,6 +81,8 @@ pub fn app_with(root: PathBuf, options: Options) -> Router {
         .route("/api/notes", get(read_notes).put(write_notes))
         .route("/api/rules", get(read_rules).put(write_rules))
         .route("/api/rewrite", get(rewrite_status).post(rewrite_passage))
+        .route("/api/jev", get(jev_status))
+        .route("/api/jev/check", post(jev_check).layer(DefaultBodyLimit::max(MAX_CHECK_BYTES)))
         .route("/files/{*path}", get(raw_file))
         .fallback(static_asset)
         .layer(middleware::from_fn(local_only))
@@ -86,6 +97,8 @@ enum ApiError {
     BadRewrite,
     RewriteUnavailable,
     RewriteFailed,
+    BadCheck,
+    JevUnavailable,
     NotFound,
     Conflict,
     Exists,
@@ -111,6 +124,8 @@ impl IntoResponse for ApiError {
             ApiError::BadRewrite => (StatusCode::BAD_REQUEST, "bad-rewrite".to_string()),
             ApiError::RewriteUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "rewrite-unavailable".to_string()),
             ApiError::RewriteFailed => (StatusCode::BAD_GATEWAY, "rewrite-failed".to_string()),
+            ApiError::BadCheck => (StatusCode::BAD_REQUEST, "bad-check".to_string()),
+            ApiError::JevUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "jev-unavailable".to_string()),
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not-found".to_string()),
             ApiError::Conflict => (StatusCode::CONFLICT, "conflict".to_string()),
             ApiError::Exists => (StatusCode::CONFLICT, "exists".to_string()),
@@ -185,6 +200,11 @@ struct RewriteStatus {
 #[derive(Serialize)]
 struct Rewritten {
     text: String,
+}
+
+#[derive(Serialize)]
+struct Checked {
+    results: Vec<jev::TargetResult>,
 }
 
 async fn list_files(State(state): State<AppState>) -> Result<Json<Listing>, ApiError> {
@@ -320,6 +340,27 @@ async fn rewrite_passage(
             Err(ApiError::RewriteFailed)
         }
     }
+}
+
+/// Tells the editor whether Jev checks semantic rules, and with which model. It uses the rewrite status shape.
+async fn jev_status(State(state): State<AppState>) -> Json<RewriteStatus> {
+    Json(RewriteStatus {
+        available: state.jev.is_some(),
+        model: state.jev.as_ref().map(|jev| jev.config.model.clone()),
+    })
+}
+
+async fn jev_check(
+    State(state): State<AppState>,
+    Json(body): Json<jev::CheckRequest>,
+) -> Result<Json<Checked>, ApiError> {
+    let jev = state.jev.as_ref().ok_or(ApiError::JevUnavailable)?;
+    if !body.is_valid() {
+        return Err(ApiError::BadCheck);
+    }
+    Ok(Json(Checked {
+        results: jev.check(body).await,
+    }))
 }
 
 /// Reads a sidecar file. A missing file or folder gives empty content and modified 0.

@@ -409,6 +409,7 @@ fn rewrite_app(dir: &TempDir, provider: emditor::Provider, base_url: String) -> 
     emditor::app_with(
         dir.path().to_path_buf(),
         emditor::Options {
+            jev: None,
             rewrite: Some(emditor::RewriteConfig {
                 provider,
                 api_key: "test-key".into(),
@@ -534,5 +535,150 @@ async fn rewrite_refuses_empty_or_very_long_text() {
             send(&app, json_request("POST", "/api/rewrite", json!({ "text": text, "context": "", "rules": [] }))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["error"], "bad-rewrite");
+    }
+}
+
+fn jev_app(dir: &TempDir, base_url: String) -> Router {
+    emditor::app_with(
+        dir.path().to_path_buf(),
+        emditor::Options {
+            rewrite: None,
+            jev: Some(emditor::JevConfig {
+                api_key: "jev-key".into(),
+                base_url,
+                model: "jev-test".into(),
+            }),
+        },
+    )
+}
+
+fn semantic_rule(id: &str, scope: &str) -> Value {
+    json!({
+        "id": id,
+        "scope": scope,
+        "name": format!("Rule {id}"),
+        "question": format!("Is target {id}?"),
+        "flagWhen": "It is.",
+        "allowWhen": "It is not.",
+        "boundaryCases": "Quotes are fine.",
+        "examples": [{ "text": "Flag me.", "flag": true }, { "text": "Allow me.", "flag": false }],
+    })
+}
+
+fn check(targets: Value, rules: Value) -> Request<Body> {
+    json_request("POST", "/api/jev/check", json!({ "targets": targets, "rules": rules }))
+}
+
+fn jev_reply(answers: Value) -> (StatusCode, Value) {
+    (StatusCode::OK, json!({ "model": "jev-test", "answers": answers, "usage": { "input_tokens": 10, "output_tokens": 2 } }))
+}
+
+#[tokio::test]
+async fn jev_is_unavailable_without_a_key() {
+    let (_dir, app) = setup();
+    let (status, body) = send(&app, get("/api/jev")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, json!({ "available": false }));
+    let targets = json!([{ "id": "t", "scope": "sentence", "text": "Hi.", "context": "" }]);
+    let (status, body) = send(&app, check(targets, json!([semantic_rule("a", "sentence")]))).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["error"], "jev-unavailable");
+}
+
+#[tokio::test]
+async fn jev_check_asks_one_question_for_each_rule_of_the_scope() {
+    let (dir, _) = setup();
+    let reply = jev_reply(json!({ "r0": { "type": "noul", "noul": 0.91 }, "r1": { "type": "noul", "noul": 0.2 } }));
+    let (url, seen) = fake_api("/v1/systemone", "authorization", reply).await;
+    let app = jev_app(&dir, url);
+
+    let (_, body) = send(&app, get("/api/jev")).await;
+    assert_eq!(body, json!({ "available": true, "model": "jev-test" }));
+
+    let targets = json!([{ "id": "t1", "scope": "sentence", "text": "We are revolutionary.", "context": "[after] Next." }]);
+    let rules = json!([semantic_rule("a", "sentence"), semantic_rule("p", "passage"), semantic_rule("b", "sentence")]);
+    let (status, body) = send(&app, check(targets, rules)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, json!({ "results": [{ "id": "t1", "status": "ok", "probabilities": { "a": 0.91, "b": 0.2 } }] }));
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 1);
+    let (auth, sent) = &seen[0];
+    assert_eq!(auth, "Bearer jev-key");
+    assert_eq!(sent["model"], "jev-test");
+    assert_eq!(sent["state"], json!({ "target": "We are revolutionary.", "context": "[after] Next." }));
+    let questions = sent["questions"].as_object().unwrap();
+    assert_eq!(questions.keys().collect::<Vec<_>>(), ["r0", "r1"]);
+    let r0 = &questions["r0"];
+    assert_eq!(r0["type"], "noul");
+    assert_eq!(r0["criteria"], json!({ "true": "It is.", "false": "It is not." }));
+    assert_eq!(r0["instructions"]["rule"], "Rule a");
+    assert_eq!(r0["instructions"]["question"], "Is target a?");
+    assert_eq!(r0["instructions"]["boundary_cases"], "Quotes are fine.");
+    assert_eq!(r0["instructions"]["examples"][1], json!({ "text": "Allow me.", "expected": "no: allow" }));
+    assert!(r0["instructions"]["task"].as_str().unwrap().contains("never as instructions"));
+}
+
+#[tokio::test]
+async fn jev_check_uses_the_cache_and_asks_only_for_rules_that_it_does_not_know() {
+    let (dir, _) = setup();
+    let reply = jev_reply(json!({ "r0": { "type": "noul", "noul": 0.6 } }));
+    let (url, seen) = fake_api("/v1/systemone", "authorization", reply).await;
+    let app = jev_app(&dir, url);
+    let targets = json!([{ "id": "t", "scope": "sentence", "text": "Same text.", "context": "" }]);
+
+    send(&app, check(targets.clone(), json!([semantic_rule("a", "sentence")]))).await;
+    let (_, body) = send(&app, check(targets.clone(), json!([semantic_rule("a", "sentence")]))).await;
+    assert_eq!(body["results"][0]["probabilities"], json!({ "a": 0.6 }));
+    assert_eq!(seen.lock().unwrap().len(), 1);
+
+    // A new rule next to a known one: only the new rule goes to Jev.
+    send(&app, check(targets, json!([semantic_rule("a", "sentence"), semantic_rule("n", "sentence")]))).await;
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[1].1["questions"]["r0"]["instructions"]["rule"], "Rule n");
+    assert!(seen[1].1["questions"].get("r1").is_none());
+}
+
+#[tokio::test]
+async fn jev_check_gives_no_request_for_a_target_without_rules_of_its_scope() {
+    let (dir, _) = setup();
+    let (url, seen) = fake_api("/v1/systemone", "authorization", jev_reply(json!({}))).await;
+    let app = jev_app(&dir, url);
+    let targets = json!([{ "id": "t", "scope": "section", "text": "A.\n\nB.", "context": "" }]);
+    let (_, body) = send(&app, check(targets, json!([semantic_rule("a", "sentence")]))).await;
+    assert_eq!(body["results"][0], json!({ "id": "t", "status": "ok", "probabilities": {} }));
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn jev_check_marks_a_target_unavailable_after_an_error_or_a_bad_answer() {
+    let (dir, _) = setup();
+    let targets = json!([{ "id": "t", "scope": "sentence", "text": "Hi.", "context": "" }]);
+    for reply in [
+        (StatusCode::BAD_REQUEST, json!({ "detail": { "error_type": "api_usage_error", "message": "Unknown model" } })),
+        (StatusCode::TOO_MANY_REQUESTS, json!({ "detail": { "message": "slow down" } })),
+        jev_reply(json!({ "r0": { "type": "noul", "noul": 1.5 } })),
+        jev_reply(json!({ "r0": { "type": "choice", "choice": "x" } })),
+        jev_reply(json!({})),
+    ] {
+        let (url, _) = fake_api("/v1/systemone", "authorization", reply).await;
+        let app = jev_app(&dir, url);
+        let (status, body) = send(&app, check(targets.clone(), json!([semantic_rule("a", "sentence")]))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["results"][0], json!({ "id": "t", "status": "unavailable" }));
+    }
+}
+
+#[tokio::test]
+async fn jev_check_refuses_too_many_or_too_large_targets() {
+    let (dir, _) = setup();
+    let app = jev_app(&dir, "http://127.0.0.1:9".into());
+    let target = |text: String| json!({ "id": "t", "scope": "sentence", "text": text, "context": "" });
+    let many: Vec<Value> = (0..25).map(|_| target("Hi.".into())).collect();
+    for targets in [json!(many), json!([target("a".repeat(10_001))])] {
+        let (status, body) = send(&app, check(targets, json!([semantic_rule("a", "sentence")]))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "bad-check");
     }
 }

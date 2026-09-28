@@ -28,6 +28,9 @@ ENVIRONMENT:
     ANTHROPIC_BASE_URL        Default: https://api.anthropic.com
     OPENAI_BASE_URL           Default: https://api.openai.com/v1
     Without a key, rewrites are off.
+    TYPESAFE_API_KEY          Turns on semantic rules checked by Jev (TypeSafe)
+    EMDITOR_JEV_MODEL         The Jev model (default: jev-1.13.0)
+    TYPESAFE_BASE_URL         Default: https://api.typesafe.ai
 ";
 
 struct Options {
@@ -138,7 +141,15 @@ async fn main() -> ExitCode {
         Some(config) => format!("on ({})", config.model),
         None => "off (set OPENAI_API_KEY or ANTHROPIC_API_KEY)".into(),
     };
-    println!("emditor  {}\n         {url}\n         rewrites {rewrites}\n         Ctrl+C to stop", root.display());
+    let jev = emditor::JevConfig::from_env();
+    let semantic = match &jev {
+        Some(config) => format!("on ({})", config.model),
+        None => "off (set TYPESAFE_API_KEY)".into(),
+    };
+    println!(
+        "emditor  {}\n         {url}\n         rewrites {rewrites}\n         semantic rules {semantic}\n         Ctrl+C to stop",
+        root.display()
+    );
 
     if options.open
         && let Err(err) = std::process::Command::new("open").arg(&url).spawn()
@@ -149,7 +160,7 @@ async fn main() -> ExitCode {
     let shutdown = async {
         let _ = tokio::signal::ctrl_c().await;
     };
-    if let Err(err) = axum::serve(listener, emditor::app_with(root, emditor::Options { rewrite }))
+    if let Err(err) = axum::serve(listener, emditor::app_with(root, emditor::Options { rewrite, jev }))
         .with_graceful_shutdown(shutdown)
         .await
     {
