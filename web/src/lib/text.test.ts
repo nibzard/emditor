@@ -42,6 +42,19 @@ describe('resolveAsset', () => {
     expect(resolveAsset('a.md', 'data:image/png;base64,xx')).toBe('data:image/png;base64,xx')
     expect(resolveAsset('a.md', '#anchor')).toBe('#anchor')
   })
+
+  it('encodes each path segment exactly once', () => {
+    expect(resolveAsset('notes/a.md', 'my%20image.png')).toBe('/files/notes/my%20image.png')
+    expect(resolveAsset('notes/a.md', 'img/p 1.png')).toBe('/files/notes/img/p%201.png')
+    expect(resolveAsset('notes/a.md', '图片 笔记.png')).toBe('/files/notes/%E5%9B%BE%E7%89%87%20%E7%AC%94%E8%AE%B0.png')
+    expect(resolveAsset('notes/a.md', '%E5%9B%BE%E7%89%87.png')).toBe('/files/notes/%E5%9B%BE%E7%89%87.png')
+  })
+
+  it('keeps queries and fragments out of the file name', () => {
+    expect(resolveAsset('notes/a.md', 'my%20image.png#fragment')).toBe('/files/notes/my%20image.png#fragment')
+    expect(resolveAsset('notes/a.md', 'scan.png?size=full&crop=1')).toBe('/files/notes/scan.png?size=full&crop=1')
+    expect(resolveAsset('notes/a.md', 'drawing.svg#svgView(viewBox(0,0,100,100))')).toBe('/files/notes/drawing.svg#svgView(viewBox(0,0,100,100))')
+  })
 })
 
 describe('timeAgo', () => {
