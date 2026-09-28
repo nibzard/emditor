@@ -184,7 +184,7 @@ export function lint(text: string, blocks: readonly TextBlock[], rules: LintRule
 }
 
 /** Gives rules that keep this occurrence of the finding. */
-export function keep(rules: LintRules, finding: Pick<Finding, 'rule' | 'match' | 'sentence'>): LintRules {
+export function keep(rules: LintRules, finding: Kept): LintRules {
   const entry: Kept = { rule: finding.rule, match: finding.match, sentence: finding.sentence }
   if (rules.kept.some((k) => keptKey(k) === keptKey(entry))) return rules
   return { ...rules, kept: [...rules.kept, entry] }

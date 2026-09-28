@@ -1,5 +1,7 @@
 // ABOUTME: Client for the emditor server API.
-// ABOUTME: It lists, reads, writes, and creates Markdown files and their notes, keeps the writing rules, and asks for rewrites.
+// ABOUTME: It lists, reads, writes, and creates Markdown files and their notes, keeps the writing rules, and asks for Jev checks and rewrites.
+
+import type { CheckRequest, CheckResponse } from './lib/semanticScheduler'
 
 export type FileEntry = { path: string; modified: number; size: number; preview: string }
 export type Listing = { root: string; path: string; files: FileEntry[] }
@@ -49,4 +51,7 @@ export const api = {
     request<{ modified: number }>('/api/rules', jsonInit('PUT', { content, baseModified })),
   rewriteStatus: () => request<{ available: boolean; model?: string }>('/api/rewrite'),
   rewrite: (body: RewriteRequest) => request<{ text: string }>('/api/rewrite', jsonInit('POST', body)),
+  jevStatus: () => request<{ available: boolean; model?: string }>('/api/jev'),
+  jevCheck: (body: CheckRequest, signal: AbortSignal) =>
+    request<CheckResponse>('/api/jev/check', { ...jsonInit('POST', body), signal }),
 }

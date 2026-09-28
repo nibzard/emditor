@@ -26,7 +26,10 @@ import { HIGHLIGHT_COLORS, type HighlightColor, type Note, type NoteKind, type T
 import type { Finding, LintRules } from '../lib/lint'
 import { docText } from '../lib/proseText'
 import { resolveAsset } from '../lib/text'
+import { api } from '../api'
+import type { SemanticFinding, SemanticStatus } from '../lib/semanticScheduler'
 import { LINT, lintPlugin, setLintRules } from './lintPlugin'
+import { SEMANTIC, type SemanticConfig, semanticPlugin, setSemanticConfig } from './semanticPlugin'
 import { acceptCuts, acceptRewrite, type AnchorReport, notesPlugin, selectionQuote, setNotes } from './notesPlugin'
 
 /** What a new annotation on the selection is: a note, a highlight with a color, or a cut. */
@@ -72,9 +75,14 @@ type Props = {
   lintRules: LintRules | null
   /** Called with the lint finding under a click in the text, and the box of its mark. */
   onLint: (finding: Finding, box: DOMRect) => void
+  /** The semantic rules for Jev; null turns them off. */
+  semantic: SemanticConfig
+  onSemanticStatus: (status: SemanticStatus) => void
+  /** Called with the semantic finding under a click in the text, and the box of its mark. */
+  onSemantic: (finding: SemanticFinding, box: DOMRect) => void
 }
 
-export function RichEditor({ docPath, initial, content, onChange, onReady, notes, highlight, onAnnotate, onAnchors, onActivateNote, handleRef, onSelection, lintRules, onLint }: Props) {
+export function RichEditor({ docPath, initial, content, onChange, onReady, notes, highlight, onAnnotate, onAnchors, onActivateNote, handleRef, onSelection, lintRules, onLint, semantic, onSemanticStatus, onSemantic }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
   const onSelectionRef = useRef(onSelection)
@@ -101,6 +109,12 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
   lintRulesRef.current = lintRules
   const onLintRef = useRef(onLint)
   onLintRef.current = onLint
+  const semanticRef = useRef(semantic)
+  semanticRef.current = semantic
+  const onSemanticStatusRef = useRef(onSemanticStatus)
+  onSemanticStatusRef.current = onSemanticStatus
+  const onSemanticRef = useRef(onSemantic)
+  onSemanticRef.current = onSemantic
 
   const readSelection = (): TextQuote | null => {
     let quote: TextQuote | null = null
@@ -263,6 +277,13 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
           if (finding) onLintRef.current(finding, mark.getBoundingClientRect())
         })
       }
+      const semanticMark = (e.target as HTMLElement).closest<HTMLElement>('[data-semantic]')
+      if (semanticMark && !mark && editor) {
+        editor.action((ctx) => {
+          const finding = SEMANTIC.getState(ctx.get(editorViewCtx).state)?.findings[Number(semanticMark.dataset.semantic)]
+          if (finding) onSemanticRef.current(finding, semanticMark.getBoundingClientRect())
+        })
+      }
     }
     host.addEventListener('click', onNoteClick)
     // ⌥⌘M adds a note, ⌥⌘1–4 highlight, and ⌥⌘⌫ marks a cut. KeyboardEvent.code, because ⌥ changes the key on macOS.
@@ -280,6 +301,11 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
     host.addEventListener('keydown', onNoteKey, true)
     const annotations = $prose(() => notesPlugin((report) => onAnchorsRef.current(report)))
     const lintMarks = $prose(() => lintPlugin())
+    const semanticMarks = $prose(() => semanticPlugin({
+      check: api.jevCheck,
+      onStatus: (status) => onSemanticStatusRef.current(status),
+      transaction: withDomSelection,
+    }))
 
     Editor.make()
       .config((ctx) => {
@@ -302,6 +328,7 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
       .use(externalPlugin)
       .use(annotations)
       .use(lintMarks)
+      .use(semanticMarks)
       .create()
       .then((created) => {
         if (disposed) {
@@ -315,6 +342,7 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
           const view = ctx.get(editorViewCtx)
           view.dispatch(setNotes(view.state.tr, notesRef.current))
           view.dispatch(setLintRules(view.state.tr, lintRulesRef.current))
+          view.dispatch(setSemanticConfig(view.state.tr, semanticRef.current))
         })
         updateSelection()
         onReadyRef.current?.()
@@ -352,6 +380,13 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
       view.dispatch(setLintRules(withDomSelection(view), lintRules))
     })
   }, [lintRules])
+
+  useEffect(() => {
+    editorRef.current?.action((ctx) => {
+      const view = ctx.get(editorViewCtx)
+      view.dispatch(setSemanticConfig(withDomSelection(view), semantic))
+    })
+  }, [semantic])
 
   return <div ref={rootRef} className="editor editor-rich" />
 }

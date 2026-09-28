@@ -141,7 +141,7 @@ export function effectiveThreshold(rule: Pick<SemanticRule, 'threshold' | 'sensi
 }
 
 /** The key of a semantic rule in the kept list. */
-export const keptRule = (id: string) => `semantic:${id}`
+export const keptRule = (id: string): `semantic:${string}` => `semantic:${id}`
 
 /** Gives rules where the rule has the text as an allow example. This makes a new version of the rule. */
 export function allowExample(rules: LintRules, id: string, text: string): LintRules {

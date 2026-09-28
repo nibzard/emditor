@@ -14,14 +14,17 @@ const Context = createContext<DocumentStore | null>(null)
 const NotesContext = createContext<NotesStore | null>(null)
 const RulesContext = createContext<RulesStore | null>(null)
 const RewriteContext = createContext<string | null>(null)
+const JevContext = createContext<string | null>(null)
 
 export function DocumentProvider({ root, children }: { root: string; children: ReactNode }) {
   const [store] = useState(() => new DocumentStore(root))
   const [notes] = useState(() => new NotesStore())
   const [rules] = useState(() => new RulesStore())
   const [rewriteModel, setRewriteModel] = useState<string | null>(null)
+  const [jevModel, setJevModel] = useState<string | null>(null)
   useEffect(() => {
     api.rewriteStatus().then((status) => setRewriteModel(status.available ? status.model ?? null : null), (err) => console.error('emditor: cannot read the rewrite status', err))
+    api.jevStatus().then((status) => setJevModel(status.available ? status.model ?? null : null), (err) => console.error('emditor: cannot read the Jev status', err))
   }, [])
   useEffect(() => {
     const onSave = () => { void store.saveAll(); void notes.saveAll() }
@@ -45,7 +48,9 @@ export function DocumentProvider({ root, children }: { root: string; children: R
     <Context.Provider value={store}>
       <NotesContext.Provider value={notes}>
         <RulesContext.Provider value={rules}>
-          <RewriteContext.Provider value={rewriteModel}>{children}</RewriteContext.Provider>
+          <RewriteContext.Provider value={rewriteModel}>
+            <JevContext.Provider value={jevModel}>{children}</JevContext.Provider>
+          </RewriteContext.Provider>
         </RulesContext.Provider>
       </NotesContext.Provider>
     </Context.Provider>
@@ -112,4 +117,9 @@ export function useRules() {
 /** The model that rewrites passages, or null when rewrites are off. */
 export function useRewriteModel() {
   return useContext(RewriteContext)
+}
+
+/** The Jev model that checks semantic rules, or null when semantic rules are off. */
+export function useJevModel() {
+  return useContext(JevContext)
 }

@@ -4,9 +4,11 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { type CSSProperties, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import { type SaveStatus, useDocument, useNotes, useRewriteModel, useRules } from '../hooks/useDocument'
+import { type SaveStatus, useDocument, useJevModel, useNotes, useRewriteModel, useRules } from '../hooks/useDocument'
 import { contextAround, kindOf, locate, type Note, quoteAt, type TextQuote, wordsAfterCuts } from '../lib/annotations'
-import { type Finding, keep } from '../lib/lint'
+import { type Finding, keep, RULE_NAMES } from '../lib/lint'
+import { allowExample, keptRule } from '../lib/semantic'
+import type { SemanticFinding, SemanticStatus } from '../lib/semanticScheduler'
 import type { ScrollSync } from '../lib/scrollSync'
 import { dirOf, titleFromPath } from '../lib/text'
 import type { Mode, PaneState } from '../lib/workspace'
@@ -65,7 +67,15 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
   const rules = useRules()
   const rewriteModel = useRewriteModel()
   const lintRules = rules.loaded ? rules.rules : null
-  const [lintCard, setLintCard] = useState<{ finding: Finding; box: DOMRect } | null>(null)
+  const jevModel = useJevModel()
+  // Semantic rules check formatted text only, so that the two modes do not send the same document twice.
+  const semantic = useMemo(
+    () => (jevModel && rules.loaded && pane.mode === 'rich' ? { rules: rules.rules.semantic, model: jevModel, kept: rules.rules.kept } : null),
+    [jevModel, rules.loaded, rules.rules, pane.mode],
+  )
+  const [semanticStatus, setSemanticStatus] = useState<SemanticStatus>('idle')
+  type Card = { kind: 'exact'; finding: Finding; box: DOMRect } | { kind: 'semantic'; finding: SemanticFinding; box: DOMRect }
+  const [lintCard, setLintCard] = useState<Card | null>(null)
   const [rulesOpen, setRulesOpen] = useState(false)
   const [rewriting, setRewriting] = useState(false)
   const [rewriteError, setRewriteError] = useState<string | null>(null)
@@ -179,6 +189,25 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
     void rules.change((r) => keep(r, finding))
     setLintCard(null)
   }
+  // A passage or a section can go over several paragraphs; a rewrite must stay in one.
+  const rewriteSemantic = async (finding: SemanticFinding) => {
+    const text = richRef.current?.plainText()
+    const [range] = finding.ranges
+    if (!text || finding.ranges.length !== 1) return
+    const rule = rules.rules.semantic.find((r) => r.id === finding.ruleId)
+    const broken = [`${finding.name}: ${rule?.flagWhen || finding.message}`]
+    if (await requestRewrite(quoteAt(text, range.from, range.to), finding.context, broken)) setLintCard(null)
+  }
+  const keepSemantic = (finding: SemanticFinding) => {
+    void rules.change((r) => keep(r, { rule: keptRule(finding.ruleId), match: finding.text, sentence: finding.text }))
+    setLintCard(null)
+  }
+  const allowSemantic = (finding: SemanticFinding) => {
+    void rules.change((r) => allowExample(r, finding.ruleId, finding.text))
+    setLintCard(null)
+  }
+  const closeCard = () => setLintCard(null)
+  const openRules = () => { setLintCard(null); setRulesOpen(true) }
   const editNote = (id: string | null) => {
     setEditing(id)
     if (id) setActive(id)
@@ -269,6 +298,11 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
           {doc && (
             <span className="pane-stats">
               {words.toLocaleString()} words{cuts.length > 0 && ` · ${wordsAfterCuts(words, cuts).toLocaleString()} after cuts`} · {pages} {pages === 1 ? 'page' : 'pages'}
+              {semantic && semanticStatus !== 'idle' && (
+                <span className="semantic-status" data-status={semanticStatus}>
+                  {semanticStatus === 'checking' ? ' · Checking…' : ' · Checking unavailable'}
+                </span>
+              )}
             </span>
           )}
           {pane.path && (
@@ -332,9 +366,16 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
       <AnimatePresence>{rulesOpen && <RulesDialog onClose={() => setRulesOpen(false)} />}</AnimatePresence>
 
       {lintCard && (
-        <LintCard finding={lintCard.finding} box={lintCard.box} rewriting={rewriting}
-          onRewrite={rewriteOn ? () => void rewriteFinding(lintCard.finding) : null}
-          onKeep={() => keepFinding(lintCard.finding)} onRules={() => { setLintCard(null); setRulesOpen(true) }} onClose={() => setLintCard(null)} />
+        lintCard.kind === 'exact' ? (
+          <LintCard title={RULE_NAMES[lintCard.finding.rule]} message={lintCard.finding.message} box={lintCard.box} rewriting={rewriting}
+            onRewrite={rewriteOn ? () => void rewriteFinding(lintCard.finding) : null}
+            onKeep={() => keepFinding(lintCard.finding)} onRules={openRules} onClose={closeCard} />
+        ) : (
+          <LintCard title={lintCard.finding.name} message={lintCard.finding.message} box={lintCard.box} rewriting={rewriting}
+            detail={`Jev: ${Math.round(lintCard.finding.probability * 100)}% · shows at ${Math.round(lintCard.finding.threshold * 100)}%`}
+            onRewrite={rewriteOn && lintCard.finding.ranges.length === 1 ? () => void rewriteSemantic(lintCard.finding) : null}
+            onKeep={() => keepSemantic(lintCard.finding)} onAllow={() => allowSemantic(lintCard.finding)} onRules={openRules} onClose={closeCard} />
+        )
       )}
 
       <div className="pane-scroll" ref={scrollRef}>
@@ -360,7 +401,9 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
                     <RichEditor docPath={doc.path} initial={editorSeed.current} content={doc.content} onChange={edit} onReady={onReady}
                       notes={editorNotes} highlight={hover ?? active} onAnnotate={annotate} onAnchors={onAnchors}
                       onActivateNote={setActive} handleRef={richRef} onSelection={setSelected}
-                      lintRules={lintRules} onLint={(finding, box) => setLintCard({ finding, box })} />
+                      lintRules={lintRules} onLint={(finding, box) => setLintCard({ kind: 'exact', finding, box })}
+                      semantic={semantic} onSemanticStatus={setSemanticStatus}
+                      onSemantic={(finding, box) => setLintCard({ kind: 'semantic', finding, box })} />
                   ) : (
                     <SourceEditor initial={editorSeed.current} content={doc.content} onChange={edit} onReady={onReady} lintRules={lintRules} />
                   )}

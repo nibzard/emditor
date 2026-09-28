@@ -2581,3 +2581,26 @@ select:focus-visible {
   margin-top: 8px;
   color: var(--ink);
 }
+
+/* ——— Semantic findings (Jev) ———
+   A sentence finding has a wavy line in the ink colour; a passage or section finding has a dotted line under each paragraph. */
+
+.lint-semantic {
+  --lint: var(--ink-2);
+}
+
+.lint-semantic.lint-scope-passage,
+.lint-semantic.lint-scope-section {
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1.5px;
+}
+
+.lint-card-detail {
+  margin: 0 0 6px;
+  color: var(--faint-ink);
+  font-size: 11.5px;
+}
+
+.semantic-status[data-status='unavailable'] {
+  color: var(--accent-ink);
+}
