@@ -1953,9 +1953,12 @@ select:focus-visible {
   transition: background-color 0.2s var(--ease), text-decoration-color 0.2s var(--ease);
 }
 
-.md-body .note-anchor.is-active {
-  background: var(--accent-soft);
-  text-decoration-color: var(--accent);
+/* Screen only, so that print keeps the plain text of the anchor. */
+@media screen {
+  .md-body .note-anchor.is-active {
+    background: var(--accent-soft);
+    text-decoration-color: var(--accent);
+  }
 }
 
 .note-margin {
@@ -2246,30 +2249,33 @@ select:focus-visible {
 .hl-blue { --hl: var(--hl-blue); --hl-solid: var(--hl-blue-solid); }
 .hl-pink { --hl: var(--hl-pink); --hl-solid: var(--hl-pink-solid); }
 
-.md-body .mark-highlight {
-  background: linear-gradient(transparent 32%, var(--hl) 32%);
-  border-radius: 1px;
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-  cursor: pointer;
-  transition: background 0.2s var(--ease);
-}
+/* Screen only: print keeps the text plain, without highlight or cut decoration. */
+@media screen {
+  .md-body .mark-highlight {
+    background: linear-gradient(transparent 32%, var(--hl) 32%);
+    border-radius: 1px;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+    cursor: pointer;
+    transition: background 0.2s var(--ease);
+  }
 
-.md-body .mark-highlight.is-active {
-  background: linear-gradient(var(--hl), var(--hl));
-}
+  .md-body .mark-highlight.is-active {
+    background: linear-gradient(var(--hl), var(--hl));
+  }
 
-.md-body .mark-cut {
-  color: var(--muted);
-  text-decoration: line-through;
-  text-decoration-color: var(--accent-ink);
-  text-decoration-thickness: 1.5px;
-  cursor: pointer;
-  transition: background-color 0.2s var(--ease);
-}
+  .md-body .mark-cut {
+    color: var(--muted);
+    text-decoration: line-through;
+    text-decoration-color: var(--accent-ink);
+    text-decoration-thickness: 1.5px;
+    cursor: pointer;
+    transition: background-color 0.2s var(--ease);
+  }
 
-.md-body .mark-cut.is-active {
-  background: var(--accent-soft);
+  .md-body .mark-cut.is-active {
+    background: var(--accent-soft);
+  }
 }
 
 .hl-swatch {
