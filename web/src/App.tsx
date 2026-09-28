@@ -12,11 +12,12 @@ import { LayoutPicker } from './components/LayoutPicker'
 import { NewDocument } from './components/NewDocument'
 import { Palette } from './components/Palette'
 import { Shortcuts } from './components/Shortcuts'
+import { StackDetails } from './components/StackDetails'
 import { Workspace } from './components/Workspace'
 import { DocumentProvider, useDocumentProblems } from './hooks/useDocument'
 import { readStored, useStoredState } from './hooks/useStoredState'
 import { useTheme } from './hooks/useTheme'
-import { buildDesk, type DeskState, EMPTY_DESK } from './lib/desk'
+import { buildDesk, type DeskItem, type DeskState, EMPTY_DESK, unstack } from './lib/desk'
 import { type Direction, LAYOUTS } from './lib/layouts'
 import { titleFromPath } from './lib/text'
 import { nextTheme, type ThemeChoice } from './lib/theme'
@@ -77,6 +78,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
   const [palette, setPalette] = useState<{ target: OpenTarget; title: string } | null>(null)
   const [newDialog, setNewDialog] = useState(false)
   const [shortcuts, setShortcuts] = useState(false)
+  const [stackKey, setStackKey] = useState<string | null>(null)
   const [focusSignal, setFocusSignal] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
   const problems = useDocumentProblems()
@@ -160,13 +162,29 @@ function Main({ initialListing }: { initialListing: Listing }) {
     const title = target === 'new' ? 'Open beside this document' : typeof target === 'number' ? `Open in pane ${target + 1}` : 'Find a document'
     setNewDialog(false)
     setShortcuts(false)
+    setStackKey(null)
     setPalette({ target, title })
   }, [])
 
   const openNew = useCallback(() => {
     setPalette(null)
     setShortcuts(false)
+    setStackKey(null)
     setNewDialog(true)
+  }, [])
+
+  const openShortcuts = useCallback(() => {
+    setPalette(null)
+    setNewDialog(false)
+    setStackKey(null)
+    setShortcuts(true)
+  }, [])
+
+  const openStackDetails = useCallback((key: string) => {
+    setPalette(null)
+    setNewDialog(false)
+    setShortcuts(false)
+    setStackKey(key)
   }, [])
 
   const switchView = useCallback((next: View) => {
@@ -194,7 +212,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
         setZoom((current) => code === 'Digit0' ? 1 : zoomStep(current, code === 'Equal' ? 1 : -1))
         return
       }
-      if (palette || newDialog || shortcuts) return
+      if (palette || newDialog || shortcuts || stackKey) return
       if (e.key === 'Escape' && focusMode && view === 'work' && !(e.target instanceof HTMLInputElement)) {
         setFocusMode(false)
         return
@@ -224,7 +242,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
           bumpFocus()
         } else if (code === 'Slash') {
           e.preventDefault()
-          setShortcuts(true)
+          openShortcuts()
         } else if (code === 'KeyN') {
           e.preventDefault()
           openNew()
@@ -249,15 +267,16 @@ function Main({ initialListing }: { initialListing: Listing }) {
       }
       if (e.key === '?' && !isTypingTarget(e.target)) {
         e.preventDefault()
-        setShortcuts(true)
+        openShortcuts()
       }
     }
     // Capture phase, so that the editors do not take these keys first.
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [palette, newDialog, shortcuts, focusMode, view, work.focus, openPalette, openNew, switchView, setZoom, setThemeChoice, setShowNotes])
+  }, [palette, newDialog, shortcuts, stackKey, focusMode, view, work.focus, openPalette, openNew, openShortcuts, switchView, setZoom, setThemeChoice, setShowNotes])
 
   const hasDocs = work.panes.some((p) => p.path)
+  const stackItem = items.find((item): item is Extract<DeskItem, { kind: 'stack' }> => item.kind === 'stack' && item.key === stackKey)
 
   return (
     <div className="app" data-focus={focusMode && view === 'work'}>
@@ -303,14 +322,14 @@ function Main({ initialListing }: { initialListing: Listing }) {
           <button className="icon-btn" onClick={() => setThemeChoice(nextTheme)} data-tip={`${THEME_LABEL[themeChoice]} ⌥T`} aria-label={THEME_LABEL[themeChoice]}>
             {themeChoice === 'dark' ? <DarkThemeIcon /> : themeChoice === 'light' ? <LightThemeIcon /> : <SystemThemeIcon />}
           </button>
-          <button className="icon-btn" onClick={() => setShortcuts(true)} data-tip="Keyboard shortcuts ?" aria-label="Keyboard shortcuts">
+          <button className="icon-btn" onClick={openShortcuts} data-tip="Keyboard shortcuts ?" aria-label="Keyboard shortcuts">
             <ShortcutsIcon />
           </button>
         </div>
       </header>
 
       <main className="stage">
-        <div className="work-layer" inert={view === 'desk' || Boolean(palette || newDialog || shortcuts)}>
+        <div className="work-layer" inert={view === 'desk' || Boolean(palette || newDialog || shortcuts || stackKey)}>
           {view === 'work' && showDocuments && !focusMode && <DocumentNavigation files={listing.files} openPaths={openPaths}
             focusedPath={focusedPath} shelf={work.shelf} problems={problems} onOpen={(path) => openDoc(path, 'slot')}
             onDesk={() => switchView('desk')} />}
@@ -337,10 +356,11 @@ function Main({ initialListing }: { initialListing: Listing }) {
                 items={items}
                 desk={desk}
                 setDesk={setDesk}
-                active={!palette && !newDialog && !shortcuts}
+                active={!palette && !newDialog && !shortcuts && !stackKey}
                 openPaths={openPaths}
                 onOpen={openDoc}
                 onOpenMany={openMany}
+                onStackDetails={openStackDetails}
                 onNew={openNew}
                 onBack={() => hasDocs && switchView('work')}
               />
@@ -363,6 +383,11 @@ function Main({ initialListing }: { initialListing: Listing }) {
         )}
         {newDialog && <NewDocument files={listing.files} onCreate={createDoc} onClose={() => setNewDialog(false)} />}
         {shortcuts && <Shortcuts onClose={() => setShortcuts(false)} />}
+        {stackItem && <StackDetails item={stackItem}
+          onOpen={(path, beside) => { setStackKey(null); openDoc(path, beside ? 'new' : 'slot') }}
+          onOpenMany={(paths) => { setStackKey(null); openMany(paths) }}
+          onUnstack={() => { setDesk(unstack(desk, items, stackItem.key)); setStackKey(null) }}
+          onClose={() => setStackKey(null)} />}
       </AnimatePresence>
 
       <AnimatePresence>
