@@ -9,7 +9,7 @@ export type LoadedDoc = { path: string; content: string; version: number }
 export type DocumentSnapshot = { doc: LoadedDoc | null; status: SaveStatus; words: number }
 export type DocumentProblem = { path: string; status: 'conflict' | 'error' }
 
-type Draft = { content: string; baseModified?: number }
+type Draft = { content: string; baseModified?: number; at: number }
 type Entry = {
   path: string
   snapshot: DocumentSnapshot
@@ -26,30 +26,131 @@ type Entry = {
   listeners: Set<() => void>
 }
 
+// Draft backups in browser storage:
+// - Each browser tab owns one key, `emditor.tabdrafts:<encoded folder>:<tab id>`.
+//   The value is a map `{ [path]: { content, baseModified?, at } }` with `at` in
+//   epoch milliseconds. A store writes and removes only its own key, so one tab
+//   cannot discard the draft backup of another tab. The tab id lives in
+//   sessionStorage and stays the same through page reloads.
+// - Older releases keep one shared key, `emditor.drafts:<folder>`. A store adopts
+//   those drafts into its own key on load; the shared key goes away once the
+//   adoption is stored, so a full browser keeps the old backup.
+// - On load, a store reads every key of this folder. Drafts from fresh keys
+//   become recovery copies; the newest `at` per path wins. A key whose newest
+//   draft is older than DEAD_TAB_MS comes from a dead tab and is removed.
+// - Two tabs that draft the same path keep separate copies; the save conflict
+//   check on the file modification time decides which copy reaches the disk.
+const DEAD_TAB_MS = 7 * 24 * 60 * 60 * 1000
+const TAB_SESSION_KEY = 'emditor.tab'
+const KEY_PREFIX = 'emditor.tabdrafts:'
+
+export function tabDraftKey(root: string, tab: string) {
+  return `${KEY_PREFIX}${encodeURIComponent(root)}:${tab}`
+}
+
+function loadTabId(): string {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      const known = sessionStorage.getItem(TAB_SESSION_KEY)
+      if (known) return known
+      const created = randomId()
+      sessionStorage.setItem(TAB_SESSION_KEY, created)
+      return created
+    }
+  } catch {
+    // Storage that throws or is absent gives this store an identity for this page life only.
+  }
+  return randomId()
+}
+
+function randomId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
+}
+
 const EMPTY: DocumentSnapshot = { doc: null, status: 'idle', words: 0 }
 const SAVE_DELAY_MS = 700
 
 export class DocumentStore {
   private entries = new Map<string, Entry>()
+  // `drafts` holds the recovery copies of every fresh tab; `ownDrafts` holds the
+  // subset that this tab persists under its own storage key.
   private drafts = new Map<string, Draft>()
+  private ownDrafts = new Map<string, Draft>()
+  private legacyPending = false
   private allListeners = new Set<() => void>()
   private problems: DocumentProblem[] = []
-  private readonly storageKey: string
+  private readonly legacyKey: string
+  private readonly ownKey: string
+  private readonly keyPrefix: string
 
   constructor(
     root: string,
     private readonly client: Pick<typeof api, 'read' | 'write'> = api,
-    private readonly storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null = typeof localStorage === 'undefined' ? null : localStorage,
+    private readonly storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem' | 'key' | 'length'> | null = typeof localStorage === 'undefined' ? null : localStorage,
+    tab: string = loadTabId(),
   ) {
-    this.storageKey = `emditor.drafts:${root}`
+    this.legacyKey = `emditor.drafts:${root}`
+    this.keyPrefix = tabDraftKey(root, '')
+    this.ownKey = `${this.keyPrefix}${tab}`
+    this.loadDrafts()
+  }
+
+  private readDrafts(key: string): Map<string, Draft> {
+    const drafts = new Map<string, Draft>()
+    let stored: unknown
     try {
-      const stored: unknown = JSON.parse(this.storage?.getItem(this.storageKey) ?? 'null')
-      if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
-        for (const [path, draft] of Object.entries(stored)) {
-          if (!draft || typeof draft !== 'object' || !('content' in draft) || typeof draft.content !== 'string') continue
-          const base = 'baseModified' in draft && typeof draft.baseModified === 'number' ? draft.baseModified : undefined
-          this.drafts.set(path, { content: draft.content, baseModified: base })
+      stored = JSON.parse(this.storage?.getItem(key) ?? 'null')
+    } catch {
+      return drafts
+    }
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return drafts
+    for (const [path, draft] of Object.entries(stored)) {
+      if (!draft || typeof draft !== 'object' || Array.isArray(draft)) continue
+      if (!('content' in draft) || typeof draft.content !== 'string') continue
+      const base = 'baseModified' in draft && typeof draft.baseModified === 'number' ? draft.baseModified : undefined
+      const at = 'at' in draft && typeof draft.at === 'number' ? draft.at : 0
+      drafts.set(path, { content: draft.content, baseModified: base, at })
+    }
+    return drafts
+  }
+
+  private loadDrafts() {
+    const storage = this.storage
+    if (!storage) return
+    try {
+      const now = Date.now()
+      const own = this.readDrafts(this.ownKey)
+      const legacy = this.readDrafts(this.legacyKey)
+      for (const [path, draft] of own) this.drafts.set(path, draft)
+      for (const [path, draft] of legacy) {
+        if (!this.drafts.has(path)) this.drafts.set(path, { ...draft, at: now })
+      }
+      this.ownDrafts = own
+      const foreignKeys: string[] = []
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index)
+        if (key && key.startsWith(this.keyPrefix) && key !== this.ownKey) foreignKeys.push(key)
+      }
+      for (const key of foreignKeys) {
+        const drafts = this.readDrafts(key)
+        let newest = 0
+        for (const draft of drafts.values()) newest = Math.max(newest, draft.at)
+        if (newest < now - DEAD_TAB_MS) {
+          storage.removeItem(key)
+          continue
         }
+        for (const [path, draft] of drafts) {
+          const known = this.drafts.get(path)
+          if (!known || draft.at > known.at) this.drafts.set(path, draft)
+        }
+      }
+      if (legacy.size > 0) {
+        for (const [path, draft] of legacy) {
+          if (!own.has(path)) own.set(path, { ...draft, at: now })
+        }
+        this.legacyPending = true
+        this.persistDrafts()
       }
     } catch {
       // Private browsing and malformed old storage must not prevent opening a folder.
@@ -58,8 +159,12 @@ export class DocumentStore {
 
   private persistDrafts() {
     try {
-      if (this.drafts.size === 0) this.storage?.removeItem(this.storageKey)
-      else this.storage?.setItem(this.storageKey, JSON.stringify(Object.fromEntries(this.drafts)))
+      if (this.ownDrafts.size === 0) this.storage?.removeItem(this.ownKey)
+      else this.storage?.setItem(this.ownKey, JSON.stringify(Object.fromEntries(this.ownDrafts)))
+      if (this.legacyPending) {
+        this.storage?.removeItem(this.legacyKey)
+        this.legacyPending = false
+      }
     } catch {
       // Saving to disk remains available when browser storage is disabled or full.
     }
@@ -67,9 +172,12 @@ export class DocumentStore {
 
   private remember(entry: Entry) {
     if (entry.revision > entry.acknowledged) {
-      this.drafts.set(entry.path, { content: entry.content, baseModified: entry.baseModified })
+      const draft: Draft = { content: entry.content, baseModified: entry.baseModified, at: Date.now() }
+      this.drafts.set(entry.path, draft)
+      this.ownDrafts.set(entry.path, draft)
     } else {
       this.drafts.delete(entry.path)
+      this.ownDrafts.delete(entry.path)
     }
     this.persistDrafts()
   }
@@ -238,9 +346,10 @@ export class DocumentStore {
     const entry = this.entries.get(path)
     if (!entry) return
     await entry.chain
+    const revision = entry.revision
     try {
       const disk = await this.client.read(path)
-      this.acceptDisk(entry, disk)
+      if (entry.revision === revision && entry.pending === 0) this.acceptDisk(entry, disk)
     } catch (err) {
       console.error(`emditor: cannot reload ${path}`, err)
       this.publish(entry, { ...entry.snapshot, status: 'error' })
