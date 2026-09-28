@@ -12,14 +12,13 @@ const externalPlugin = $prose(() => new Plugin({
 }))
 
 import { type MutableRefObject, useEffect, useRef } from 'react'
-import { commandsCtx, defaultValueCtx, Editor, editorViewCtx, parserCtx, remarkStringifyOptionsCtx, rootCtx } from '@milkdown/kit/core'
+import { commandsCtx, defaultValueCtx, Editor, editorViewCtx, parserCtx, remarkStringifyOptionsCtx, rootCtx, serializerCtx } from '@milkdown/kit/core'
 import { clipboard } from '@milkdown/kit/plugin/clipboard'
 import { history } from '@milkdown/kit/plugin/history'
-import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
 import { commonmark, imageSchema, toggleEmphasisCommand, toggleLinkCommand, toggleStrongCommand, turnIntoTextCommand, wrapInBulletListCommand, wrapInHeadingCommand } from '@milkdown/kit/preset/commonmark'
 import { gfm } from '@milkdown/kit/preset/gfm'
 import type { Node } from '@milkdown/kit/prose/model'
-import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state'
+import { type EditorState, Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { $prose, $view } from '@milkdown/kit/utils'
 import { HIGHLIGHT_COLORS, type HighlightColor, type Note, type NoteKind, type TextQuote } from '../lib/annotations'
@@ -192,6 +191,29 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
     rootRef.current!.appendChild(host)
     let editor: Editor | null = null
     let disposed = false
+    // The change sink of this document only. It is taken once here, so a document that takes
+    // the pane over later never receives the text of this editor.
+    const change = onChangeRef.current
+    // The markdown of the last moment when the store and this editor held the same text.
+    let baseline = ''
+    const publish = (markdown: string) => {
+      if (markdown === seen.current) return
+      seen.current = markdown
+      change(markdown)
+    }
+    // Sends the text that the editor holds now, as long as it is not the text the store
+    // already knows. This runs when the editor is about to go away, because delayed work
+    // does not survive that moment.
+    const flush = () => {
+      const current = editorRef.current
+      if (!current) return
+      let markdown: string | null = null
+      current.action((ctx) => { markdown = ctx.get(serializerCtx)(ctx.get(editorViewCtx).state.doc) })
+      if (markdown === null || markdown === baseline) return
+      publish(markdown)
+    }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
     const updateSelection = () => {
       const selection = window.getSelection()
       const inside = Boolean(selection && !selection.isCollapsed && selection.anchorNode && host.contains(selection.anchorNode))
@@ -280,6 +302,24 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
     host.addEventListener('keydown', onNoteKey, true)
     const annotations = $prose(() => notesPlugin((report) => onAnchorsRef.current(report)))
     const lintMarks = $prose(() => lintPlugin())
+    // Every document change reaches the store in the same tick as the change itself. The
+    // packaged markdownUpdated event waits 200 ms and cancels itself when the editor is
+    // destroyed, so an edit that is followed at once by a mode switch, a pane close, or an
+    // unload would never arrive through it.
+    const publisher = $prose((ctx) => new Plugin({
+      view: () => ({
+        update: (view: EditorView, prev: EditorState) => {
+          if (view.state.doc.eq(prev.doc)) return
+          const markdown = ctx.get(serializerCtx)(view.state.doc)
+          if (EXTERNAL.getState(view.state)) {
+            // Text that another pane sent: the store holds it already, so it is only the new base.
+            baseline = markdown
+            return
+          }
+          publish(markdown)
+        },
+      }),
+    }))
 
     Editor.make()
       .config((ctx) => {
@@ -287,16 +327,11 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
         ctx.set(defaultValueCtx, initial)
         // Write Markdown in the most common style, so edits do not rewrite every list and rule.
         ctx.update(remarkStringifyOptionsCtx, (options) => ({ ...options, bullet: '-' as const, rule: '-' as const }))
-        ctx.get(listenerCtx).markdownUpdated((listenerContext, markdown, prev) => {
-          if (markdown === prev || EXTERNAL.getState(listenerContext.get(editorViewCtx).state)) return
-          seen.current = markdown
-          onChangeRef.current(markdown)
-        })
       })
       .use(commonmark)
       .use(gfm)
       .use(history)
-      .use(listener)
+      .use(publisher)
       .use(clipboard)
       .use(imageView)
       .use(externalPlugin)
@@ -313,6 +348,7 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
         applyExternal(created, contentRef.current, seen)
         created.action((ctx) => {
           const view = ctx.get(editorViewCtx)
+          baseline = ctx.get(serializerCtx)(view.state.doc)
           view.dispatch(setNotes(view.state.tr, notesRef.current))
           view.dispatch(setLintRules(view.state.tr, lintRulesRef.current))
         })
@@ -329,6 +365,10 @@ export function RichEditor({ docPath, initial, content, onChange, onReady, notes
       host.removeEventListener('mouseup', updateSelection)
       host.removeEventListener('keyup', updateSelection)
       document.removeEventListener('selectionchange', updateSelection)
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
+      // The last word leaves while the editor still lives: destroying it cancels waiting work.
+      flush()
       editorRef.current = null
       void editor?.destroy()
       host.remove()
