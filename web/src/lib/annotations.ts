@@ -102,6 +102,25 @@ export function locate(text: string, quote: TextQuote): Span | null {
   return null
 }
 
+/**
+ * Finds a quote inside one part of the text, between from and to. When the part holds the passage more
+ * than once, the context decides between the equal passages, as in `locate`. Returns null when the part
+ * does not hold the passage. Only the exact passage counts, so a part with changed text gives null.
+ */
+export function locateWithin(text: string, from: number, to: number, quote: TextQuote): Span | null {
+  if (!quote.exact) return null
+  let best: Span | null = null
+  let bestScore = -1
+  for (let at = text.indexOf(quote.exact, from); at >= 0 && at + quote.exact.length <= to; at = text.indexOf(quote.exact, at + 1)) {
+    const score = contextScore(text, at, at + quote.exact.length, quote)
+    if (score > bestScore) {
+      best = { from: at, to: at + quote.exact.length }
+      bestScore = score
+    }
+  }
+  return best
+}
+
 /** Moves the ends of a selection past white space. Returns null when nothing but white space is left. */
 export function trimSpan(text: string, from: number, to: number): Span | null {
   while (from < to && /\s/.test(text[from])) from++

@@ -150,6 +150,34 @@ describe('notesPlugin anchors', () => {
     expect(NOTES.getState(redone)!.report.detached).toEqual(['n'])
   })
 
+  it('takes a detached note back when an undo brings back more than its text', () => {
+    const state = setup([CATS], [{ id: 'n', phrase: 'cat' }], [history()])
+    const from = at('cat')
+    const deleted = state.apply(state.tr.delete(1 + from, 1 + from + 'cat sat.'.length))
+    expect(docText(deleted.doc).text).toBe('The  The cat slept.')
+    expect(NOTES.getState(deleted)!.report.detached).toEqual(['n'])
+    const undone = applyCommand(deleted, undo)
+    expect(NOTES.getState(undone)!.report.attached).toEqual(['n'])
+    expect(spanText(undone, 'n')).toBe('cat')
+    expect(NOTES.getState(undone)!.spans.get('n')!.from).toBe(from)
+    const redone = applyCommand(undone, redo)
+    expect(NOTES.getState(redone)!.report.detached).toEqual(['n'])
+  })
+
+  it('takes a detached note back at the right one of two equal passages that an undo brings back', () => {
+    const notes = notesFor([CATS], [{ id: 'n', phrase: 'cat' }])
+    const text = docText(doc([CATS])).text
+    const at2 = text.indexOf('cat', text.indexOf('cat') + 1)
+    let state = EditorState.create({ doc: doc([CATS]), plugins: [notesPlugin(() => {}), history()] })
+    state = state.apply(setNotes(state.tr, { notes: [{ ...notes[0], quote: quoteAt(text, at2, at2 + 'cat'.length) }], highlight: null }))
+    expect(NOTES.getState(state)!.spans.get('n')!.from).toBe(at2)
+    const deleted = state.apply(state.tr.delete(1 + at('cat'), 1 + at2 + 'cat'.length))
+    expect(NOTES.getState(deleted)!.report.detached).toEqual(['n'])
+    const undone = applyCommand(deleted, undo)
+    expect(NOTES.getState(undone)!.report.attached).toEqual(['n'])
+    expect(NOTES.getState(undone)!.spans.get('n')!.from).toBe(at2)
+  })
+
   it('anchors a note again on a replaced document, using its context', () => {
     const notes = notesFor([CATS], [{ id: 'n', phrase: 'cat' }])
     let state = EditorState.create({ doc: doc(['An opening sentence was written here. ' + CATS]), plugins: [notesPlugin(() => {})] })

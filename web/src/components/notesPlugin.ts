@@ -5,7 +5,7 @@ import { type Node } from '@milkdown/kit/prose/model'
 import { type EditorState, Plugin, PluginKey, type Transaction } from '@milkdown/kit/prose/state'
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view'
 import {
-  type AttachedNote, colorOf, cutRange, kindOf, locate, type Note, quoteAt, refreshQuotes, sameQuote, type Span,
+  type AttachedNote, colorOf, cutRange, kindOf, locate, locateWithin, type Note, quoteAt, refreshQuotes, sameQuote, type Span,
   type TextQuote, trimSpan, wordsAfterCuts,
 } from '../lib/annotations'
 import { type DocText, docText } from '../lib/proseText'
@@ -130,9 +130,11 @@ function carry(tr: Transaction, anchors: Anchors, map: DocText): Anchors {
     }
     const from = tr.mapping.map(pos.from, 1)
     const to = tr.mapping.map(pos.to, -1)
-    // Text that came back between the two ends takes the note back; any other text does not.
-    const back = from > to && map.text.slice(map.toOffset(to), map.toOffset(from)) === anchors.quotes.get(id)?.exact
-    if (back) live.set(id, { from: to, to: from })
+    // The passage that came back between the two ends takes the note back, also when an undo of a
+    // wider deletion brought other text back with it; any other text does not.
+    const quote = anchors.quotes.get(id)
+    const span = quote && from > to ? locateWithin(map.text, map.toOffset(to), map.toOffset(from), quote) : null
+    if (span) live.set(id, { from: map.toPos(span.from, 'start'), to: map.toPos(span.to, 'end') })
     else lost.set(id, { from, to })
   }
   return { live, lost, quotes: anchors.quotes }

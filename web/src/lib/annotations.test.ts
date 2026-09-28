@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  anchorNotes, colorOf, contextAround, cutRange, diffWords, kindOf, locate, mergeNotes, type Note, parseNotes, quoteAt, refreshQuotes, serializeNotes,
+  anchorNotes, colorOf, contextAround, cutRange, diffWords, kindOf, locate, locateWithin, mergeNotes, type Note, parseNotes, quoteAt, refreshQuotes, serializeNotes,
   stackMargin, trimSpan, wordsAfterCuts,
 } from './annotations'
 
@@ -62,6 +62,26 @@ describe('locate', () => {
 
   it('returns null for an empty quote', () => {
     expect(locate(TEXT, { exact: '', prefix: '', suffix: '' })).toBeNull()
+  })
+})
+
+describe('locateWithin', () => {
+  it('finds the passage inside the part, with the context deciding between equals', () => {
+    const second = TEXT.indexOf('cat', TEXT.indexOf('cat') + 1)
+    const quote = quoteAt(TEXT, second, second + 3)
+    expect(locateWithin(TEXT, 0, TEXT.length, quote)).toEqual({ from: second, to: second + 3 })
+  })
+
+  it('holds the part bounds and gives null when the passage is outside it', () => {
+    const first = TEXT.indexOf('cat')
+    const second = TEXT.indexOf('cat', first + 1)
+    const quote = quoteAt(TEXT, first, first + 3)
+    expect(locateWithin(TEXT, 0, first + 3, quote)).toEqual({ from: first, to: first + 3 })
+    expect(locateWithin(TEXT, first + 3, second, quote)).toBeNull()
+  })
+
+  it('returns null for an empty quote', () => {
+    expect(locateWithin(TEXT, 0, TEXT.length, { exact: '', prefix: '', suffix: '' })).toBeNull()
   })
 })
 
