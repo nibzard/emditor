@@ -17,7 +17,8 @@ import { DocumentProvider, useDocumentProblems } from './hooks/useDocument'
 import { readStored, useStoredState } from './hooks/useStoredState'
 import { useTheme } from './hooks/useTheme'
 import { buildDesk, type DeskState, EMPTY_DESK } from './lib/desk'
-import { type Direction, LAYOUTS } from './lib/layouts'
+import { type Direction, LAYOUTS, MAX_PANES } from './lib/layouts'
+import { parseBoolean, parseDesk, parseWork, parseZoom } from './lib/stored'
 import { titleFromPath } from './lib/text'
 import { nextTheme, type ThemeChoice } from './lib/theme'
 import { zoomLabel, zoomStep } from './lib/zoom'
@@ -49,14 +50,13 @@ export default function App() {
 }
 
 function startWork(listing: Listing): Work {
-  const stored = readStored<Work | null>(`emditor.work:${listing.path}`, null)
-  const restored = Boolean(stored && Array.isArray(stored.panes) && stored.panes.length > 0)
-  let work = restored ? stored! : initialWork()
+  const stored = readStored<Work | null>(`emditor.work:${listing.path}`, null, parseWork)
+  let work = stored ?? initialWork()
   work = workReducer(work, { type: 'prune', existing: listing.files.map((f) => f.path) })
   const fromUrl = new URLSearchParams(location.search).get('file')
   if (fromUrl && listing.files.some((f) => f.path === fromUrl)) {
     work = workReducer(work, { type: 'open', path: fromUrl, where: 'slot' })
-  } else if (!restored && listing.files.length > 0) {
+  } else if (!stored && listing.files.length > 0) {
     const recent = listing.files.reduce((latest, file) => file.modified > latest.modified ? file : latest)
     work = workReducer(work, { type: 'open', path: recent.path, where: 'slot' })
   }
@@ -66,13 +66,13 @@ function startWork(listing: Listing): Work {
 function Main({ initialListing }: { initialListing: Listing }) {
   const [listing, setListing] = useState(initialListing)
   const root = listing.path
-  const [desk, setDesk] = useStoredState<DeskState>(`emditor.desk:${root}`, EMPTY_DESK)
+  const [desk, setDesk] = useStoredState<DeskState>(`emditor.desk:${root}`, EMPTY_DESK, parseDesk)
   const [work, dispatch] = useReducer(workReducer, initialListing, startWork)
   const [view, setView] = useState<View>('work')
-  const [showDocuments, setShowDocuments] = useStoredState(`emditor.documents${window.matchMedia('(max-width: 580px)').matches ? '.mobile' : ''}:${root}`, !window.matchMedia('(max-width: 580px)').matches)
+  const [showDocuments, setShowDocuments] = useStoredState(`emditor.documents${window.matchMedia('(max-width: 580px)').matches ? '.mobile' : ''}:${root}`, !window.matchMedia('(max-width: 580px)').matches, parseBoolean)
   const [focusMode, setFocusMode] = useState(false)
-  const [zoom, setZoom] = useStoredState(`emditor.zoom:${root}`, 1)
-  const [showNotes, setShowNotes] = useStoredState('emditor.notes', true)
+  const [zoom, setZoom] = useStoredState(`emditor.zoom:${root}`, 1, parseZoom)
+  const [showNotes, setShowNotes] = useStoredState('emditor.notes', true, parseBoolean)
   const { choice: themeChoice, setChoice: setThemeChoice } = useTheme()
   const [palette, setPalette] = useState<{ target: OpenTarget; title: string } | null>(null)
   const [newDialog, setNewDialog] = useState(false)
@@ -124,8 +124,8 @@ function Main({ initialListing }: { initialListing: Listing }) {
   const bumpFocus = () => setFocusSignal((n) => n + 1)
 
   const openDoc = useCallback((path: string, where: OpenTarget) => {
-    if (where === 'new' && work.panes.filter((pane) => pane.path).length >= 6) {
-      setToast('Six documents are open. Close one before opening another beside it.')
+    if (where === 'new' && work.panes.filter((pane) => pane.path).length >= MAX_PANES) {
+      setToast(`${MAX_PANES} documents are open. Close one before opening another beside it.`)
       return
     }
     dispatch({ type: 'open', path, where })
@@ -137,7 +137,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
 
   const openMany = useCallback((paths: string[]) => {
     dispatch({ type: 'openMany', paths })
-    if (paths.length > 6) setToast('Opened the first six documents. The others are still available in the stack.')
+    if (paths.length > MAX_PANES) setToast(`Opened the first ${MAX_PANES} documents. The others are still available in the stack.`)
     setView('work')
     setFocusSignal((n) => n + 1)
   }, [])
@@ -279,7 +279,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
           <AnimatePresence initial={false}>
             {view === 'work' && (
               <motion.div className="tool-group" initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 6 }}>
-                {hasDocs && work.panes.filter((pane) => pane.path).length < 6 && <button className="icon-btn" onClick={() => openPalette('new')}
+                {hasDocs && work.panes.filter((pane) => pane.path).length < MAX_PANES && <button className="icon-btn" onClick={() => openPalette('new')}
                   data-tip="Open beside" aria-label="Open beside…"><OpenBesideIcon /></button>}
                 <LayoutPicker value={work.layout} onChange={(id) => dispatch({ type: 'layout', id })} />
                 {work.panes.length > 1 && <button className="icon-btn lock-btn" data-on={work.lock}

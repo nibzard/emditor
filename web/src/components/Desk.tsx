@@ -6,6 +6,7 @@ import { type CSSProperties, type MouseEvent, useCallback, useEffect, useRef, us
 import type { Listing } from '../api'
 import { useStoredState } from '../hooks/useStoredState'
 import { type DeskItem, type DeskState, itemPaths, moveBy, moveItem, type SortMode, stackItems, unstack } from '../lib/desk'
+import { parseBoundedNumber } from '../lib/stored'
 import { DeskCard, type DropZone } from './DeskCard'
 import { Enso } from './Enso'
 import { MinusIcon, PlusIcon } from './icons'
@@ -35,7 +36,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen, onOpenMany, onNew, onBack }: Props) {
-  const [size, setSize] = useStoredState('emditor.thumbSize', 1)
+  const [size, setSize] = useStoredState('emditor.thumbSize', 1, parseBoundedNumber(0, THUMB_SIZES.length - 1))
   const [cursor, setCursor] = useState(0)
   const [keyboard, setKeyboard] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
