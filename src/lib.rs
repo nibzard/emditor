@@ -5,9 +5,11 @@ mod rewrite;
 
 pub use rewrite::{Provider, RewriteConfig};
 
-use std::io::ErrorKind;
+use std::collections::HashMap;
+use std::io::{ErrorKind, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
 
 use axum::extract::{Path as UrlPath, Query, Request, State};
@@ -34,6 +36,10 @@ const RULES_DIR: &[&str] = &[".emditor"];
 const RULES_FILE: &str = "rules.json";
 /// Upper limit of characters in a passage to rewrite.
 const MAX_REWRITE_CHARS: usize = 20_000;
+/// How many temporary names one write tries before it gives up.
+const TEMP_NAME_ATTEMPTS: u32 = 8;
+/// Counts the temporary files of this process, so each write attempt uses its own name.
+static TEMP_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(RustEmbed)]
 #[folder = "web/dist"]
@@ -214,9 +220,14 @@ async fn read_file(
     State(state): State<AppState>,
     Query(query): Query<PathQuery>,
 ) -> Result<Json<Doc>, ApiError> {
+    use tokio::io::AsyncReadExt;
+
     let full = resolve_markdown(&state.root, &query.path)?;
-    let content = tokio::fs::read_to_string(&full).await?;
-    let meta = tokio::fs::metadata(&full).await?;
+    // One handle gives the content and the modified time of the same version.
+    let mut file = tokio::fs::File::open(&full).await?;
+    let mut content = String::new();
+    file.read_to_string(&mut content).await?;
+    let meta = file.metadata().await?;
     Ok(Json(Doc {
         path: query.path,
         content,
@@ -230,17 +241,12 @@ async fn write_file(
     Json(body): Json<WriteBody>,
 ) -> Result<Json<Saved>, ApiError> {
     let full = resolve_markdown(&state.root, &query.path)?;
-    if let Some(base) = body.base_modified {
-        let meta = tokio::fs::metadata(&full).await?;
-        if modified_ms(&meta) != base {
-            return Err(ApiError::Conflict);
-        }
-    }
-    write_atomic(&full, &body.content).await?;
-    let meta = tokio::fs::metadata(&full).await?;
-    Ok(Json(Saved {
-        modified: modified_ms(&meta),
-    }))
+    let base = match body.base_modified {
+        Some(base) => BaseRevision::Existing(base),
+        None => BaseRevision::Any,
+    };
+    let modified = save_checked(&full, base, &body.content).await?;
+    Ok(Json(Saved { modified }))
 }
 
 async fn create_file(
@@ -330,6 +336,8 @@ async fn rewrite_passage(
 
 /// Reads a sidecar file. A missing file or folder gives empty content and modified 0.
 async fn read_sidecar(full: Option<PathBuf>) -> Result<Json<Sidecar>, ApiError> {
+    use tokio::io::AsyncReadExt;
+
     let empty = Sidecar {
         content: String::new(),
         modified: 0,
@@ -337,9 +345,12 @@ async fn read_sidecar(full: Option<PathBuf>) -> Result<Json<Sidecar>, ApiError> 
     let Some(full) = full else {
         return Ok(Json(empty));
     };
-    match tokio::fs::read_to_string(&full).await {
-        Ok(content) => {
-            let meta = tokio::fs::metadata(&full).await?;
+    // One handle gives the content and the modified time of the same version.
+    match tokio::fs::File::open(&full).await {
+        Ok(mut file) => {
+            let mut content = String::new();
+            file.read_to_string(&mut content).await?;
+            let meta = file.metadata().await?;
             Ok(Json(Sidecar {
                 content,
                 modified: modified_ms(&meta),
@@ -352,19 +363,13 @@ async fn read_sidecar(full: Option<PathBuf>) -> Result<Json<Sidecar>, ApiError> 
 
 /// Writes a sidecar file when its modified time is still the one that the writer read.
 async fn write_sidecar(full: &Path, body: &SidecarBody) -> Result<Json<Saved>, ApiError> {
-    let current = match tokio::fs::metadata(full).await {
-        Ok(meta) => modified_ms(&meta),
-        Err(err) if err.kind() == ErrorKind::NotFound => 0,
-        Err(err) => return Err(err.into()),
-    };
-    if current != body.base_modified {
-        return Err(ApiError::Conflict);
-    }
-    write_atomic(full, &body.content).await?;
-    let meta = tokio::fs::metadata(full).await?;
-    Ok(Json(Saved {
-        modified: modified_ms(&meta),
-    }))
+    let modified = save_checked(
+        full,
+        BaseRevision::OrAbsent(body.base_modified),
+        &body.content,
+    )
+    .await?;
+    Ok(Json(Saved { modified }))
 }
 
 fn is_json_object(content: &str) -> bool {
@@ -592,14 +597,128 @@ fn sidecar_file(root: &Path, full: PathBuf) -> Result<PathBuf, ApiError> {
     Ok(full)
 }
 
-async fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
+/// The state that a destination must have before a save may replace it.
+enum BaseRevision {
+    /// No condition. The save replaces the destination whatever its state.
+    Any,
+    /// The destination must exist and have this modified time.
+    Existing(u64),
+    /// The destination must have this modified time, where a missing destination counts as time 0.
+    OrAbsent(u64),
+}
+
+/// Saves `content` to `path` as one serialized sequence: the check of the base revision and
+/// the replacement of the file never interleave with another save of the same path in this
+/// process. Gives the modified time of the version that this save wrote.
+async fn save_checked(path: &Path, base: BaseRevision, content: &str) -> Result<u64, ApiError> {
+    let path = path.to_path_buf();
+    let content = content.to_string();
+    tokio::task::spawn_blocking(move || {
+        let lock = path_lock(&path);
+        let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let checked = match base {
+            BaseRevision::Any => None,
+            BaseRevision::Existing(expected) => {
+                let file = std::fs::File::open(&path)?;
+                Some((expected, modified_ms(&file.metadata()?)))
+            }
+            BaseRevision::OrAbsent(expected) => Some((
+                expected,
+                match std::fs::File::open(&path) {
+                    Ok(file) => modified_ms(&file.metadata()?),
+                    Err(err) if err.kind() == ErrorKind::NotFound => 0,
+                    Err(err) => return Err(err.into()),
+                },
+            )),
+        };
+        if let Some((expected, current)) = checked
+            && current != expected
+        {
+            return Err(ApiError::Conflict);
+        }
+        write_atomic(&path, &content).map_err(ApiError::from)
+    })
+    .await
+    .map_err(|err| ApiError::Io(std::io::Error::other(err)))?
+}
+
+/// Gives the lock of one destination path. Every save to the path takes this lock for the
+/// whole check-and-replace sequence, so saves from different tabs or clients of this process
+/// run one after the other. The key joins the canonical parent folder to the file name, so a
+/// destination that does not exist yet always gets the same lock.
+fn path_lock(path: &Path) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let key = match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => parent
+            .canonicalize()
+            .unwrap_or_else(|_| parent.to_path_buf())
+            .join(name),
+        _ => path.to_path_buf(),
+    };
+    LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
+/// Writes `content` to `path` through a temporary file in the destination folder and puts it
+/// in place with one rename. Every attempt makes its own temporary file with exclusive
+/// creation, so no already existing file is opened, followed, or reused, and the rename
+/// replaces the destination entry itself. A destination that exists keeps its permissions.
+/// A failed attempt removes its temporary file. Gives the modified time of the written
+/// version. The caller holds the lock of the destination.
+fn write_atomic(path: &Path, content: &str) -> std::io::Result<u64> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let tmp = path.with_file_name(format!(".{name}.emditor-tmp"));
-    tokio::fs::write(&tmp, content).await?;
-    tokio::fs::rename(&tmp, path).await
+    let pid = std::process::id();
+    for _ in 0..TEMP_NAME_ATTEMPTS {
+        let count = TEMP_COUNT.fetch_add(1, Ordering::Relaxed);
+        let tmp = path.with_file_name(format!(".{name}.emditor-tmp-{pid}-{count}"));
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+        {
+            Ok(file) => file,
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
+        };
+        match replace_with(&mut file, &tmp, path, content) {
+            Ok(modified) => return Ok(modified),
+            Err(err) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(err);
+            }
+        }
+    }
+    Err(std::io::Error::new(
+        ErrorKind::AlreadyExists,
+        format!("no unused temporary name for {name}"),
+    ))
+}
+
+/// Writes the content through the open temporary file and moves it onto the destination.
+fn replace_with(
+    file: &mut std::fs::File,
+    tmp: &Path,
+    path: &Path,
+    content: &str,
+) -> std::io::Result<u64> {
+    // Keep the permissions of the destination. A destination that cannot be read, for example
+    // because this write makes it new, keeps the default permissions of the temporary file.
+    if let Ok(dest) = std::fs::metadata(path) {
+        file.set_permissions(dest.permissions())?;
+    }
+    file.write_all(content.as_bytes())?;
+    file.sync_all()?;
+    let modified = modified_ms(&file.metadata()?);
+    std::fs::rename(tmp, path)?;
+    Ok(modified)
 }
 
 fn modified_ms(meta: &std::fs::Metadata) -> u64 {

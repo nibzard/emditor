@@ -51,6 +51,17 @@ async fn send(app: &Router, req: Request<Body>) -> (StatusCode, Value) {
     (status, value)
 }
 
+/// Names the temporary files of `name` that stayed in `dir`.
+fn temp_names(dir: &std::path::Path, name: &str) -> Vec<String> {
+    let prefix = format!(".{name}.emditor-tmp");
+    std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|file| file.starts_with(&prefix))
+        .collect()
+}
+
 #[tokio::test]
 async fn lists_markdown_files_and_skips_hidden_and_vendor_folders() {
     let (_dir, app) = setup();
@@ -147,7 +158,7 @@ async fn writes_a_file_and_returns_the_new_modified_time() {
         std::fs::read_to_string(dir.path().join("alpha.md")).unwrap(),
         "changed"
     );
-    assert!(!dir.path().join(".alpha.md.emditor-tmp").exists());
+    assert!(temp_names(dir.path(), "alpha.md").is_empty());
 }
 
 #[tokio::test]
@@ -168,6 +179,181 @@ async fn write_with_an_old_base_is_a_conflict() {
         std::fs::read_to_string(dir.path().join("alpha.md")).unwrap(),
         "# Alpha\n\nFirst."
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn save_does_not_use_a_preexisting_temporary_name_symlink() {
+    let (dir, app) = setup();
+    let outside = tempfile::tempdir().unwrap();
+    let target = outside.path().join("out.md");
+    std::fs::write(&target, "outside").unwrap();
+    // A symbolic link with the predictable temporary name, put there before the save.
+    std::os::unix::fs::symlink(&target, dir.path().join(".alpha.md.emditor-tmp")).unwrap();
+
+    let (_, doc) = send(&app, get("/api/file?path=alpha.md")).await;
+    let base = doc["modified"].as_u64().unwrap();
+    let (status, _) = send(
+        &app,
+        json_request(
+            "PUT",
+            "/api/file?path=alpha.md",
+            json!({ "content": "safe", "baseModified": base }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The file outside the served folder stays as it was.
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "outside");
+    // The document is a regular file with the saved content, not the symbolic link.
+    let doc_path = dir.path().join("alpha.md");
+    assert_eq!(std::fs::read_to_string(&doc_path).unwrap(), "safe");
+    assert!(
+        !std::fs::symlink_metadata(&doc_path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    // The preexisting symbolic link is still there; the save never opened or moved it.
+    let decoy = dir.path().join(".alpha.md.emditor-tmp");
+    assert!(
+        std::fs::symlink_metadata(&decoy)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read_to_string(&decoy).unwrap(), "outside");
+    // The save left no temporary file; the entry with the temporary prefix is the decoy itself.
+    assert_eq!(
+        temp_names(dir.path(), "alpha.md"),
+        vec![".alpha.md.emditor-tmp"]
+    );
+}
+
+#[tokio::test]
+async fn concurrent_saves_with_one_base_give_one_success_and_conflicts() {
+    let (dir, app) = setup();
+    let (_, doc) = send(&app, get("/api/file?path=alpha.md")).await;
+    let base = doc["modified"].as_u64().unwrap();
+    // Wait past the millisecond of the base revision, so every write of this test
+    // gets a modified time that a stale base cannot match.
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+
+    let mut saves = Vec::new();
+    for i in 0..16 {
+        let app = app.clone();
+        let body = json!({ "content": format!("writer {i}"), "baseModified": base });
+        saves.push(tokio::spawn(async move {
+            send(&app, json_request("PUT", "/api/file?path=alpha.md", body))
+                .await
+                .0
+        }));
+    }
+    let mut successes = 0;
+    let mut conflicts = 0;
+    for save in saves {
+        match save.await.unwrap() {
+            StatusCode::OK => successes += 1,
+            StatusCode::CONFLICT => conflicts += 1,
+            status => panic!("unexpected status {status} from a concurrent save"),
+        }
+    }
+    assert_eq!(successes, 1);
+    assert_eq!(conflicts, 15);
+
+    let content = std::fs::read_to_string(dir.path().join("alpha.md")).unwrap();
+    assert!(
+        (0..16).any(|i| content == format!("writer {i}")),
+        "unexpected document content {content:?}"
+    );
+    assert!(temp_names(dir.path(), "alpha.md").is_empty());
+}
+
+#[tokio::test]
+async fn saves_that_refresh_the_base_revision_all_succeed() {
+    let (dir, app) = setup();
+    let (_, doc) = send(&app, get("/api/file?path=alpha.md")).await;
+    let mut base = doc["modified"].as_u64().unwrap();
+    for round in 0..16 {
+        let (status, body) = send(
+            &app,
+            json_request(
+                "PUT",
+                "/api/file?path=alpha.md",
+                json!({ "content": format!("round {round}"), "baseModified": base }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "round {round}");
+        base = body["modified"].as_u64().unwrap();
+    }
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("alpha.md")).unwrap(),
+        "round 15"
+    );
+    assert!(temp_names(dir.path(), "alpha.md").is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn save_keeps_the_mode_of_the_destination() {
+    let (dir, app) = setup();
+    use std::os::unix::fs::PermissionsExt;
+    let doc_path = dir.path().join("alpha.md");
+    std::fs::set_permissions(&doc_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+    let (_, doc) = send(&app, get("/api/file?path=alpha.md")).await;
+    let base = doc["modified"].as_u64().unwrap();
+    let (status, _) = send(
+        &app,
+        json_request(
+            "PUT",
+            "/api/file?path=alpha.md",
+            json!({ "content": "kept", "baseModified": base }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(std::fs::read_to_string(&doc_path).unwrap(), "kept");
+    assert_eq!(
+        std::fs::metadata(&doc_path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert!(temp_names(dir.path(), "alpha.md").is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn notes_save_keeps_the_mode_and_leaves_no_temporary_file() {
+    let (dir, app) = setup();
+    use std::os::unix::fs::PermissionsExt;
+    let first = json!({ "content": "{\"version\":1,\"notes\":[]}", "baseModified": 0 });
+    let (status, saved) = send(&app, json_request("PUT", "/api/notes?path=alpha.md", first)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let sidecar = dir.path().join(".emditor/notes/alpha.md.json");
+    std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let second = json!({
+        "content": "{\"version\":1,\"notes\":[{}]}",
+        "baseModified": saved["modified"]
+    });
+    let (status, _) = send(
+        &app,
+        json_request("PUT", "/api/notes?path=alpha.md", second),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    assert_eq!(
+        std::fs::read_to_string(&sidecar).unwrap(),
+        "{\"version\":1,\"notes\":[{}]}"
+    );
+    assert_eq!(
+        std::fs::metadata(&sidecar).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert!(temp_names(dir.path().join(".emditor/notes").as_path(), "alpha.md.json").is_empty());
 }
 
 #[tokio::test]
