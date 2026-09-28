@@ -29,8 +29,16 @@ The exact rules (phrases, repeated words, long sentences) do not change. They st
 - `429` and `Retry-After` are possible. jevditor keeps below 1,000 requests each minute and uses a timeout of 1.5 s.
 
 Rust has no TypeSafe SDK, so emditor calls this HTTP API with `reqwest`, as it does for rewrites.
-**Check before step 3:** make sure that the API shape, the current model name, and the rate limits are the same today.
-jevditor pins `jev-1.13.0`. Thresholds are only correct for the model that they were tuned against.
+Thresholds are only correct for the model that they were tuned against.
+
+### Checked with a real key (2026-09-28)
+
+- `POST /v1/systemone` with `noul` and `choice` questions works as described above. Each request took about 0.3 s, which is much less than the 1.5 s timeout.
+- `GET /v1/models` lists only `jev-latest` and `jev-preview`. But the reply of each request gives the real model: `jev-latest` is `jev-1.13.0` now.
+- A request with `"model": "jev-1.13.0"` works, so emditor can pin the version. Use `jev-1.13.0` as the default of `EMDITOR_JEV_MODEL`. Put the `model` of the reply in the cache key, so that a change of the alias does not use old results.
+- A LinkedIn-style announcement gave 0.97 for "Avoid LinkedIn voice". A plain status sentence gave 0.05. The phrase `choice` question picked the correct phrase with confidence 0.51.
+- An error does **not** use `{ "error": { "message" } }`. An unknown model gave HTTP 400 with `{ "detail": { "error_type": "api_usage_error", "message": "Unknown model: ..." } }`. The server must read `detail.message`.
+- Rate limits and `429` replies were not checked.
 
 ## Design
 
