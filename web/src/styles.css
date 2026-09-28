@@ -1395,11 +1395,7 @@ kbd {
   cursor: pointer;
 }
 
-.palette-hl {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: 8px;
+.palette-row[data-active='true'] {
   background: var(--bg);
 }
 
