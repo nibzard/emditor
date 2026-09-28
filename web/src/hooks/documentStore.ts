@@ -33,7 +33,8 @@ type Entry = {
 //   cannot discard the draft backup of another tab. The tab id lives in
 //   sessionStorage and stays the same through page reloads.
 // - Older releases keep one shared key, `emditor.drafts:<folder>`. A store adopts
-//   those drafts into its own key on load and then removes the shared key.
+//   those drafts into its own key on load; the shared key goes away once the
+//   adoption is stored, so a full browser keeps the old backup.
 // - On load, a store reads every key of this folder. Drafts from fresh keys
 //   become recovery copies; the newest `at` per path wins. A key whose newest
 //   draft is older than DEAD_TAB_MS comes from a dead tab and is removed.
@@ -76,6 +77,7 @@ export class DocumentStore {
   // subset that this tab persists under its own storage key.
   private drafts = new Map<string, Draft>()
   private ownDrafts = new Map<string, Draft>()
+  private legacyPending = false
   private allListeners = new Set<() => void>()
   private problems: DocumentProblem[] = []
   private readonly legacyKey: string
@@ -124,6 +126,7 @@ export class DocumentStore {
       for (const [path, draft] of legacy) {
         if (!this.drafts.has(path)) this.drafts.set(path, { ...draft, at: now })
       }
+      this.ownDrafts = own
       const foreignKeys: string[] = []
       for (let index = 0; index < storage.length; index += 1) {
         const key = storage.key(index)
@@ -142,13 +145,12 @@ export class DocumentStore {
           if (!known || draft.at > known.at) this.drafts.set(path, draft)
         }
       }
-      this.ownDrafts = own
       if (legacy.size > 0) {
         for (const [path, draft] of legacy) {
           if (!own.has(path)) own.set(path, { ...draft, at: now })
         }
+        this.legacyPending = true
         this.persistDrafts()
-        storage.removeItem(this.legacyKey)
       }
     } catch {
       // Private browsing and malformed old storage must not prevent opening a folder.
@@ -159,6 +161,10 @@ export class DocumentStore {
     try {
       if (this.ownDrafts.size === 0) this.storage?.removeItem(this.ownKey)
       else this.storage?.setItem(this.ownKey, JSON.stringify(Object.fromEntries(this.ownDrafts)))
+      if (this.legacyPending) {
+        this.storage?.removeItem(this.legacyKey)
+        this.legacyPending = false
+      }
     } catch {
       // Saving to disk remains available when browser storage is disabled or full.
     }

@@ -38,19 +38,20 @@ function setup() {
   return { store, client, storage, memory, open, disk: () => disk, setDisk: (content: string) => { disk = { ...disk, content, modified: disk.modified + 1 } } }
 }
 
-function folderSetup(files: Record<string, string>) {
+function folderSetup(files: Record<string, string>, conflicts = false) {
   const memory = new Map<string, string>()
   const storage = memoryStorage(memory)
   const disk = new Map(Object.entries(files).map(([path, content]) => [path, { content, modified: 1 }]))
   const client = {
     read: vi.fn(async (path: string) => ({ path, ...disk.get(path)! })),
-    write: vi.fn(async (path: string, content: string) => {
+    write: vi.fn(async (path: string, content: string, base?: number) => {
+      if (conflicts && base !== undefined && base !== disk.get(path)!.modified) throw new ApiError('conflict', 409)
       const modified = (disk.get(path)?.modified ?? 0) + 1
       disk.set(path, { content, modified })
       return { modified }
     }),
   }
-  return { memory, storage, client }
+  return { memory, storage, client, diskState: disk }
 }
 
 function draftKey(tab: string) {
@@ -173,6 +174,51 @@ describe('DocumentStore', () => {
     new DocumentStore('/test-folder', test.client, test.storage, 'tab-a')
     expect(test.memory.has(draftKey('gone-tab'))).toBe(false)
     expect(test.memory.has(draftKey('live-tab'))).toBe(true)
+  })
+
+  it('keeps both copies when two tabs draft the same path', async () => {
+    const test = folderSetup({ 'a.md': '# Base\n' }, true)
+    const tabA = new DocumentStore('/test-folder', test.client, test.storage, 'tab-a')
+    const tabB = new DocumentStore('/test-folder', test.client, test.storage, 'tab-b')
+    tabA.open('a.md')
+    await vi.waitFor(() => expect(tabA.getSnapshot('a.md').doc?.content).toBe('# Base\n'))
+    tabB.open('a.md')
+    await vi.waitFor(() => expect(tabB.getSnapshot('a.md').doc?.content).toBe('# Base\n'))
+    tabA.edit('a.md', '# From A\n')
+    tabB.edit('a.md', '# From B\n')
+    await tabA.save('a.md')
+    await tabB.save('a.md')
+    expect(test.diskState.get('a.md')!.content).toBe('# From A\n')
+    expect(tabB.getSnapshot('a.md').status).toBe('conflict')
+    expect(tabB.getSnapshot('a.md').doc?.content).toBe('# From B\n')
+    const stored = JSON.parse(test.memory.get(draftKey('tab-b')) ?? '{}') as Record<string, { content: string }>
+    expect(stored['a.md']?.content).toBe('# From B\n')
+  })
+
+  it('keeps the shared backup of an older release when browser storage refuses the adoption write', () => {
+    const memory = new Map<string, string>([['emditor.drafts:/test-folder', JSON.stringify({ 'old.md': { content: '# Legacy\n' } })]])
+    let quota = true
+    const storage = {
+      getItem: (key: string) => memory.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (quota) throw new DOMException('quota exceeded', 'QuotaExceededError')
+        memory.set(key, value)
+      },
+      removeItem: (key: string) => { memory.delete(key) },
+      get length() { return memory.size },
+      key: (index: number) => [...memory.keys()][index] ?? null,
+    }
+    const client = {
+      read: vi.fn(async (path: string) => ({ path, content: '# Disk\n', modified: 1 })),
+      write: vi.fn(async () => ({ modified: 2 })),
+    }
+    const store = new DocumentStore('/test-folder', client, storage, 'tab-a')
+    expect(memory.has('emditor.drafts:/test-folder')).toBe(true)
+    quota = false
+    store.edit('old.md', '# Edited\n')
+    const stored = JSON.parse(memory.get(draftKey('tab-a')) ?? '{}') as Record<string, { content: string }>
+    expect(stored['old.md']?.content).toBe('# Edited\n')
+    expect(memory.has('emditor.drafts:/test-folder')).toBe(false)
   })
 
   it('reuses the tab identity in session storage so a reload keeps the draft key', async () => {
