@@ -1,15 +1,17 @@
-// ABOUTME: The writing rules of the folder: phrases to avoid, repeated words, long sentences, and kept occurrences.
+// ABOUTME: The writing rules of the folder: phrases to avoid, repeated words, long sentences, semantic rules, and kept occurrences.
 // ABOUTME: Changes apply when the dialog closes or when a rule is turned on or off; they save to .emditor/rules.json.
 
 import { useState } from 'react'
-import { useRules } from '../hooks/useDocument'
+import { useJevModel, useRules } from '../hooks/useDocument'
 import { type LintRules, RULE_NAMES, type RuleKey } from '../lib/lint'
 import { Dialog } from './Dialog'
+import { SemanticRules } from './SemanticRules'
 
 type Props = { onClose: () => void }
 
 export function RulesDialog({ onClose }: Props) {
   const { rules, loaded, status, change, retry } = useRules()
+  const jevModel = useJevModel()
   const [phrases, setPhrases] = useState(() => rules.phrases.list.join('\n'))
   const [maxWords, setMaxWords] = useState(() => String(rules.sentenceLength.maxWords))
 
@@ -75,6 +77,8 @@ export function RulesDialog({ onClose }: Props) {
             words
           </label>
         </section>
+
+        <SemanticRules rules={rules} set={set} jevModel={jevModel} />
 
         <section className="rule rule-kept">
           <h2>Kept occurrences</h2>
