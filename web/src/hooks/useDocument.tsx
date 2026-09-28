@@ -82,7 +82,6 @@ export function useDocument(path: string | null) {
   return {
     ...snapshot,
     edit: (markdown: string) => { if (path) store.edit(path, markdown) },
-    save: () => path ? store.save(path) : Promise.resolve(),
     reload: () => path ? store.reload(path) : Promise.resolve(),
     keepMine: () => path ? store.retry(path, true) : Promise.resolve(),
     retry: () => path ? store.retry(path) : Promise.resolve(),
@@ -103,7 +102,7 @@ export function useNotes(path: string | null) {
     update: (id: string, patch: Partial<Pick<Note, 'body' | 'resolved' | 'quote' | 'color'>>) => { if (path) store.update(path, id, patch) },
     requote: (quotes: Map<string, TextQuote>) => { if (path) store.requote(path, quotes) },
     remove: (id: string) => { if (path) store.remove(path, id) },
-    retry: () => (path ? store.save(path) : Promise.resolve()),
+    retry: () => (path ? store.retry(path) : Promise.resolve()),
   }
 }
 

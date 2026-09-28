@@ -6,11 +6,11 @@ import { type CSSProperties, type MouseEvent, useCallback, useEffect, useRef, us
 import type { Listing } from '../api'
 import { useStoredState } from '../hooks/useStoredState'
 import { type DeskItem, type DeskState, itemPaths, moveBy, moveItem, type SortMode, stackItems, unstack } from '../lib/desk'
+import { parseBoundedNumber } from '../lib/stored'
 import { DeskCard, type DropZone } from './DeskCard'
 import { Enso } from './Enso'
 import { MinusIcon, PlusIcon } from './icons'
 import { Segmented } from './Segmented'
-import { StackDetails } from './StackDetails'
 
 const THUMB_SIZES = [128, 164, 212, 268]
 const SORTS: SortMode[] = ['recent', 'name', 'manual']
@@ -25,6 +25,7 @@ type Props = {
   openPaths: Set<string>
   onOpen: (path: string, where: 'slot' | 'new') => void
   onOpenMany: (paths: string[]) => void
+  onStackDetails: (key: string) => void
   onNew: () => void
   onBack: () => void
 }
@@ -34,14 +35,13 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return !!el && (el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
 }
 
-export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen, onOpenMany, onNew, onBack }: Props) {
-  const [size, setSize] = useStoredState('emditor.thumbSize', 1)
+export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen, onOpenMany, onStackDetails, onNew, onBack }: Props) {
+  const [size, setSize] = useStoredState('emditor.thumbSize', 1, parseBoundedNumber(0, THUMB_SIZES.length - 1))
   const [cursor, setCursor] = useState(0)
   const [keyboard, setKeyboard] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [dropHint, setDropHint] = useState<{ key: string; zone: DropZone } | null>(null)
-  const [expandedStack, setExpandedStack] = useState<string | null>(null)
   const gridRef = useRef<HTMLDivElement>(null)
 
   const thumbWidth = THUMB_SIZES[Math.max(0, Math.min(THUMB_SIZES.length - 1, size))]
@@ -76,7 +76,7 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
   }, [])
 
   useEffect(() => {
-    if (!active || expandedStack) return
+    if (!active) return
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
       const card = target.closest?.('.card-body')
@@ -110,7 +110,7 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
         case 'Enter': {
           e.preventDefault()
           const chosen = selected.size > 0 ? items.filter((i) => selected.has(i.key)) : current ? [current] : []
-          if (chosen.length === 1 && chosen[0].kind === 'stack') setExpandedStack(chosen[0].key)
+          if (chosen.length === 1 && chosen[0].kind === 'stack') onStackDetails(chosen[0].key)
           else openItems(chosen, e.shiftKey)
           return
         }
@@ -149,7 +149,7 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [active, expandedStack, items, current, selected, desk, setDesk, openItems, stackChosen, columns, onNew, onBack, setSize])
+  }, [active, items, current, selected, desk, setDesk, openItems, stackChosen, columns, onStackDetails, onNew, onBack, setSize])
 
   useEffect(() => {
     if (!keyboard) return
@@ -175,7 +175,7 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
       })
       return
     }
-    if (item.kind === 'stack') setExpandedStack(item.key)
+    if (item.kind === 'stack') onStackDetails(item.key)
     else openItems([item], e.shiftKey)
   }
 
@@ -188,7 +188,6 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
   }
 
   const style = { '--thumb-w': `${thumbWidth}px`, '--thumb-scale': thumbWidth / PAGE_WIDTH_PX } as CSSProperties
-  const currentStack = items.find((item): item is Extract<DeskItem, { kind: 'stack' }> => item.kind === 'stack' && item.key === expandedStack)
 
   return (
     <div className="desk" style={style} data-keyboard={keyboard}>
@@ -268,11 +267,6 @@ export function Desk({ listing, items, desk, setDesk, active, openPaths, onOpen,
           </div>
         </LayoutGroup>
       )}
-
-      {currentStack && <StackDetails item={currentStack} onOpen={(path, beside) => { setExpandedStack(null); onOpen(path, beside ? 'new' : 'slot') }}
-        onOpenMany={(paths) => { setExpandedStack(null); onOpenMany(paths) }}
-        onUnstack={() => { setDesk(unstack(desk, items, currentStack.key)); setExpandedStack(null) }}
-        onClose={() => setExpandedStack(null)} />}
     </div>
   )
 }

@@ -12,12 +12,14 @@ import { LayoutPicker } from './components/LayoutPicker'
 import { NewDocument } from './components/NewDocument'
 import { Palette } from './components/Palette'
 import { Shortcuts } from './components/Shortcuts'
+import { StackDetails } from './components/StackDetails'
 import { Workspace } from './components/Workspace'
 import { DocumentProvider, useDocumentProblems } from './hooks/useDocument'
 import { readStored, useStoredState } from './hooks/useStoredState'
 import { useTheme } from './hooks/useTheme'
-import { buildDesk, type DeskState, EMPTY_DESK } from './lib/desk'
-import { type Direction, LAYOUTS } from './lib/layouts'
+import { buildDesk, type DeskItem, type DeskState, EMPTY_DESK, unstack } from './lib/desk'
+import { type Direction, LAYOUTS, MAX_PANES } from './lib/layouts'
+import { parseBoolean, parseDesk, parseWork, parseZoom } from './lib/stored'
 import { titleFromPath } from './lib/text'
 import { nextTheme, type ThemeChoice } from './lib/theme'
 import { zoomLabel, zoomStep } from './lib/zoom'
@@ -49,14 +51,13 @@ export default function App() {
 }
 
 function startWork(listing: Listing): Work {
-  const stored = readStored<Work | null>(`emditor.work:${listing.path}`, null)
-  const restored = Boolean(stored && Array.isArray(stored.panes) && stored.panes.length > 0)
-  let work = restored ? stored! : initialWork()
+  const stored = readStored<Work | null>(`emditor.work:${listing.path}`, null, parseWork)
+  let work = stored ?? initialWork()
   work = workReducer(work, { type: 'prune', existing: listing.files.map((f) => f.path) })
   const fromUrl = new URLSearchParams(location.search).get('file')
   if (fromUrl && listing.files.some((f) => f.path === fromUrl)) {
     work = workReducer(work, { type: 'open', path: fromUrl, where: 'slot' })
-  } else if (!restored && listing.files.length > 0) {
+  } else if (!stored && listing.files.length > 0) {
     const recent = listing.files.reduce((latest, file) => file.modified > latest.modified ? file : latest)
     work = workReducer(work, { type: 'open', path: recent.path, where: 'slot' })
   }
@@ -66,17 +67,18 @@ function startWork(listing: Listing): Work {
 function Main({ initialListing }: { initialListing: Listing }) {
   const [listing, setListing] = useState(initialListing)
   const root = listing.path
-  const [desk, setDesk] = useStoredState<DeskState>(`emditor.desk:${root}`, EMPTY_DESK)
+  const [desk, setDesk] = useStoredState<DeskState>(`emditor.desk:${root}`, EMPTY_DESK, parseDesk)
   const [work, dispatch] = useReducer(workReducer, initialListing, startWork)
   const [view, setView] = useState<View>('work')
-  const [showDocuments, setShowDocuments] = useStoredState(`emditor.documents${window.matchMedia('(max-width: 580px)').matches ? '.mobile' : ''}:${root}`, !window.matchMedia('(max-width: 580px)').matches)
+  const [showDocuments, setShowDocuments] = useStoredState(`emditor.documents${window.matchMedia('(max-width: 580px)').matches ? '.mobile' : ''}:${root}`, !window.matchMedia('(max-width: 580px)').matches, parseBoolean)
   const [focusMode, setFocusMode] = useState(false)
-  const [zoom, setZoom] = useStoredState(`emditor.zoom:${root}`, 1)
-  const [showNotes, setShowNotes] = useStoredState('emditor.notes', true)
+  const [zoom, setZoom] = useStoredState(`emditor.zoom:${root}`, 1, parseZoom)
+  const [showNotes, setShowNotes] = useStoredState('emditor.notes', true, parseBoolean)
   const { choice: themeChoice, setChoice: setThemeChoice } = useTheme()
   const [palette, setPalette] = useState<{ target: OpenTarget; title: string } | null>(null)
   const [newDialog, setNewDialog] = useState(false)
   const [shortcuts, setShortcuts] = useState(false)
+  const [stackKey, setStackKey] = useState<string | null>(null)
   const [focusSignal, setFocusSignal] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
   const problems = useDocumentProblems()
@@ -124,8 +126,8 @@ function Main({ initialListing }: { initialListing: Listing }) {
   const bumpFocus = () => setFocusSignal((n) => n + 1)
 
   const openDoc = useCallback((path: string, where: OpenTarget) => {
-    if (where === 'new' && work.panes.filter((pane) => pane.path).length >= 6) {
-      setToast('Six documents are open. Close one before opening another beside it.')
+    if (where === 'new' && work.panes.filter((pane) => pane.path).length >= MAX_PANES) {
+      setToast(`${MAX_PANES} documents are open. Close one before opening another beside it.`)
       return
     }
     dispatch({ type: 'open', path, where })
@@ -137,7 +139,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
 
   const openMany = useCallback((paths: string[]) => {
     dispatch({ type: 'openMany', paths })
-    if (paths.length > 6) setToast('Opened the first six documents. The others are still available in the stack.')
+    if (paths.length > MAX_PANES) setToast(`Opened the first ${MAX_PANES} documents. The others are still available in the stack.`)
     setView('work')
     setFocusSignal((n) => n + 1)
   }, [])
@@ -160,13 +162,29 @@ function Main({ initialListing }: { initialListing: Listing }) {
     const title = target === 'new' ? 'Open beside this document' : typeof target === 'number' ? `Open in pane ${target + 1}` : 'Find a document'
     setNewDialog(false)
     setShortcuts(false)
+    setStackKey(null)
     setPalette({ target, title })
   }, [])
 
   const openNew = useCallback(() => {
     setPalette(null)
     setShortcuts(false)
+    setStackKey(null)
     setNewDialog(true)
+  }, [])
+
+  const openShortcuts = useCallback(() => {
+    setPalette(null)
+    setNewDialog(false)
+    setStackKey(null)
+    setShortcuts(true)
+  }, [])
+
+  const openStackDetails = useCallback((key: string) => {
+    setPalette(null)
+    setNewDialog(false)
+    setShortcuts(false)
+    setStackKey(key)
   }, [])
 
   const switchView = useCallback((next: View) => {
@@ -194,7 +212,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
         setZoom((current) => code === 'Digit0' ? 1 : zoomStep(current, code === 'Equal' ? 1 : -1))
         return
       }
-      if (palette || newDialog || shortcuts) return
+      if (palette || newDialog || shortcuts || stackKey) return
       if (e.key === 'Escape' && focusMode && view === 'work' && !(e.target instanceof HTMLInputElement)) {
         setFocusMode(false)
         return
@@ -224,7 +242,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
           bumpFocus()
         } else if (code === 'Slash') {
           e.preventDefault()
-          setShortcuts(true)
+          openShortcuts()
         } else if (code === 'KeyN') {
           e.preventDefault()
           openNew()
@@ -249,15 +267,16 @@ function Main({ initialListing }: { initialListing: Listing }) {
       }
       if (e.key === '?' && !isTypingTarget(e.target)) {
         e.preventDefault()
-        setShortcuts(true)
+        openShortcuts()
       }
     }
     // Capture phase, so that the editors do not take these keys first.
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [palette, newDialog, shortcuts, focusMode, view, work.focus, openPalette, openNew, switchView, setZoom, setThemeChoice, setShowNotes])
+  }, [palette, newDialog, shortcuts, stackKey, focusMode, view, work.focus, openPalette, openNew, openShortcuts, switchView, setZoom, setThemeChoice, setShowNotes])
 
   const hasDocs = work.panes.some((p) => p.path)
+  const stackItem = items.find((item): item is Extract<DeskItem, { kind: 'stack' }> => item.kind === 'stack' && item.key === stackKey)
 
   return (
     <div className="app" data-focus={focusMode && view === 'work'}>
@@ -279,7 +298,7 @@ function Main({ initialListing }: { initialListing: Listing }) {
           <AnimatePresence initial={false}>
             {view === 'work' && (
               <motion.div className="tool-group" initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 6 }}>
-                {hasDocs && work.panes.filter((pane) => pane.path).length < 6 && <button className="icon-btn" onClick={() => openPalette('new')}
+                {hasDocs && work.panes.filter((pane) => pane.path).length < MAX_PANES && <button className="icon-btn" onClick={() => openPalette('new')}
                   data-tip="Open beside" aria-label="Open beside…"><OpenBesideIcon /></button>}
                 <LayoutPicker value={work.layout} onChange={(id) => dispatch({ type: 'layout', id })} />
                 {work.panes.length > 1 && <button className="icon-btn lock-btn" data-on={work.lock}
@@ -303,14 +322,14 @@ function Main({ initialListing }: { initialListing: Listing }) {
           <button className="icon-btn" onClick={() => setThemeChoice(nextTheme)} data-tip={`${THEME_LABEL[themeChoice]} ⌥T`} aria-label={THEME_LABEL[themeChoice]}>
             {themeChoice === 'dark' ? <DarkThemeIcon /> : themeChoice === 'light' ? <LightThemeIcon /> : <SystemThemeIcon />}
           </button>
-          <button className="icon-btn" onClick={() => setShortcuts(true)} data-tip="Keyboard shortcuts ?" aria-label="Keyboard shortcuts">
+          <button className="icon-btn" onClick={openShortcuts} data-tip="Keyboard shortcuts ?" aria-label="Keyboard shortcuts">
             <ShortcutsIcon />
           </button>
         </div>
       </header>
 
       <main className="stage">
-        <div className="work-layer" inert={view === 'desk' || Boolean(palette || newDialog || shortcuts)}>
+        <div className="work-layer" inert={view === 'desk' || Boolean(palette || newDialog || shortcuts || stackKey)}>
           {view === 'work' && showDocuments && !focusMode && <DocumentNavigation files={listing.files} openPaths={openPaths}
             focusedPath={focusedPath} shelf={work.shelf} problems={problems} onOpen={(path) => openDoc(path, 'slot')}
             onDesk={() => switchView('desk')} />}
@@ -337,10 +356,11 @@ function Main({ initialListing }: { initialListing: Listing }) {
                 items={items}
                 desk={desk}
                 setDesk={setDesk}
-                active={!palette && !newDialog && !shortcuts}
+                active={!palette && !newDialog && !shortcuts && !stackKey}
                 openPaths={openPaths}
                 onOpen={openDoc}
                 onOpenMany={openMany}
+                onStackDetails={openStackDetails}
                 onNew={openNew}
                 onBack={() => hasDocs && switchView('work')}
               />
@@ -363,6 +383,11 @@ function Main({ initialListing }: { initialListing: Listing }) {
         )}
         {newDialog && <NewDocument files={listing.files} onCreate={createDoc} onClose={() => setNewDialog(false)} />}
         {shortcuts && <Shortcuts onClose={() => setShortcuts(false)} />}
+        {stackItem && <StackDetails item={stackItem}
+          onOpen={(path, beside) => { setStackKey(null); openDoc(path, beside ? 'new' : 'slot') }}
+          onOpenMany={(paths) => { setStackKey(null); openMany(paths) }}
+          onUnstack={() => { setDesk(unstack(desk, items, stackItem.key)); setStackKey(null) }}
+          onClose={() => setStackKey(null)} />}
       </AnimatePresence>
 
       <AnimatePresence>

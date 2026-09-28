@@ -3,7 +3,7 @@
 
 import type { CheckRequest, CheckResponse } from './lib/semanticScheduler'
 
-export type FileEntry = { path: string; modified: number; size: number; preview: string }
+export type FileEntry = { path: string; modified: number; preview: string }
 export type Listing = { root: string; path: string; files: FileEntry[] }
 export type Doc = { path: string; content: string; modified: number }
 /** The notes file of a document. A document without notes has empty content and modified 0. */

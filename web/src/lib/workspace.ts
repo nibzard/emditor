@@ -35,7 +35,7 @@ export type WorkAction =
 const SHELF_SIZE = 12
 
 let paneCounter = 0
-export function newPane(path: string | null, mode: Mode): PaneState {
+function newPane(path: string | null, mode: Mode): PaneState {
   paneCounter += 1
   return { id: `pane-${Date.now().toString(36)}-${paneCounter}`, path, mode }
 }

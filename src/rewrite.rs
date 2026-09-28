@@ -52,24 +52,49 @@ impl RewriteConfig {
     /// `EMDITOR_REWRITE_MODEL`, `ANTHROPIC_BASE_URL`, and `OPENAI_BASE_URL` change the defaults.
     /// Gives None when there is no key, and an error for an unknown provider or a selected provider without a key.
     pub fn from_vars(var: impl Fn(&str) -> Option<String>) -> Result<Option<Self>, String> {
-        let get = |name: &str| var(name).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-        let provider = match get("EMDITOR_REWRITE_PROVIDER").map(|p| p.to_lowercase()).as_deref() {
+        let get = |name: &str| {
+            var(name)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        let provider = match get("EMDITOR_REWRITE_PROVIDER")
+            .map(|p| p.to_lowercase())
+            .as_deref()
+        {
             Some("anthropic") => Provider::Anthropic,
             Some("openai") => Provider::OpenAi,
-            Some(other) => return Err(format!("unknown EMDITOR_REWRITE_PROVIDER: {other} (use anthropic or openai)")),
+            Some(other) => {
+                return Err(format!(
+                    "unknown EMDITOR_REWRITE_PROVIDER: {other} (use anthropic or openai)"
+                ));
+            }
             None if get("OPENAI_API_KEY").is_some() => Provider::OpenAi,
             None if get("ANTHROPIC_API_KEY").is_some() => Provider::Anthropic,
             None => return Ok(None),
         };
         let (key_var, url_var, url, model) = match provider {
-            Provider::Anthropic => ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", ANTHROPIC_BASE_URL, ANTHROPIC_MODEL),
-            Provider::OpenAi => ("OPENAI_API_KEY", "OPENAI_BASE_URL", OPENAI_BASE_URL, OPENAI_MODEL),
+            Provider::Anthropic => (
+                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_BASE_URL",
+                ANTHROPIC_BASE_URL,
+                ANTHROPIC_MODEL,
+            ),
+            Provider::OpenAi => (
+                "OPENAI_API_KEY",
+                "OPENAI_BASE_URL",
+                OPENAI_BASE_URL,
+                OPENAI_MODEL,
+            ),
         };
-        let api_key = get(key_var).ok_or_else(|| format!("EMDITOR_REWRITE_PROVIDER needs {key_var}"))?;
+        let api_key =
+            get(key_var).ok_or_else(|| format!("EMDITOR_REWRITE_PROVIDER needs {key_var}"))?;
         Ok(Some(Self {
             provider,
             api_key,
-            base_url: get(url_var).unwrap_or_else(|| url.into()).trim_end_matches('/').to_string(),
+            base_url: get(url_var)
+                .unwrap_or_else(|| url.into())
+                .trim_end_matches('/')
+                .to_string(),
             model: get("EMDITOR_REWRITE_MODEL").unwrap_or_else(|| model.into()),
         }))
     }
@@ -96,7 +121,10 @@ fn prompt(req: &RewriteRequest) -> String {
     }
     if !req.rules.is_empty() {
         let list: Vec<String> = req.rules.iter().map(|r| format!("- {r}")).collect();
-        parts.push(format!("<style_rules>\n{}\n</style_rules>", list.join("\n")));
+        parts.push(format!(
+            "<style_rules>\n{}\n</style_rules>",
+            list.join("\n")
+        ));
     }
     let instruction = if req.instruction.trim().is_empty() {
         DEFAULT_INSTRUCTION
@@ -110,14 +138,20 @@ fn prompt(req: &RewriteRequest) -> String {
 /// Takes the text between <revised> and </revised>, or all the text when the tags are missing.
 fn revised(reply: &str) -> &str {
     let inner = match reply.split_once("<revised>") {
-        Some((_, rest)) => rest.split_once("</revised>").map_or(rest, |(inner, _)| inner),
+        Some((_, rest)) => rest
+            .split_once("</revised>")
+            .map_or(rest, |(inner, _)| inner),
         None => reply,
     };
     inner.trim()
 }
 
 /// Asks the model for a revision. The error is a short reason for the server log.
-pub async fn rewrite(client: &reqwest::Client, config: &RewriteConfig, req: &RewriteRequest) -> Result<String, String> {
+pub async fn rewrite(
+    client: &reqwest::Client,
+    config: &RewriteConfig,
+    req: &RewriteRequest,
+) -> Result<String, String> {
     let request = match config.provider {
         Provider::Anthropic => client
             .post(format!("{}/v1/messages", config.base_url))
@@ -149,7 +183,10 @@ pub async fn rewrite(client: &reqwest::Client, config: &RewriteConfig, req: &Rew
         .await
         .map_err(|err| format!("request failed: {err}"))?;
     let status = res.status();
-    let reply: Value = res.json().await.map_err(|err| format!("bad reply: {err}"))?;
+    let reply: Value = res
+        .json()
+        .await
+        .map_err(|err| format!("bad reply: {err}"))?;
     if !status.is_success() {
         let message = reply["error"]["message"].as_str().unwrap_or("no message");
         return Err(format!("status {status}: {message}"));
@@ -182,7 +219,9 @@ fn anthropic_text(reply: &Value) -> Result<String, String> {
 /// The text of a Responses API reply: the output_text parts of its message items.
 fn openai_text(reply: &Value) -> Result<String, String> {
     if reply["status"] != "completed" {
-        let reason = reply["incomplete_details"]["reason"].as_str().unwrap_or("unknown reason");
+        let reason = reply["incomplete_details"]["reason"]
+            .as_str()
+            .unwrap_or("unknown reason");
         return Err(format!("the response is {}: {reason}", reply["status"]));
     }
     let parts: Vec<&Value> = reply["output"]
@@ -193,7 +232,10 @@ fn openai_text(reply: &Value) -> Result<String, String> {
         .flat_map(|item| item["content"].as_array().into_iter().flatten())
         .collect();
     if let Some(refusal) = parts.iter().find(|p| p["type"] == "refusal") {
-        return Err(format!("the model declined the request: {}", refusal["refusal"].as_str().unwrap_or("")));
+        return Err(format!(
+            "the model declined the request: {}",
+            refusal["refusal"].as_str().unwrap_or("")
+        ));
     }
     Ok(parts
         .iter()
@@ -208,13 +250,19 @@ mod tests {
     use std::collections::HashMap;
 
     fn config(vars: &[(&str, &str)]) -> Result<Option<RewriteConfig>, String> {
-        let map: HashMap<String, String> = vars.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let map: HashMap<String, String> = vars
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         RewriteConfig::from_vars(|name| map.get(name).cloned())
     }
 
     #[test]
     fn takes_the_revised_text_from_the_tags() {
-        assert_eq!(revised("Here:\n<revised>\n New text \n</revised>\nDone."), "New text");
+        assert_eq!(
+            revised("Here:\n<revised>\n New text \n</revised>\nDone."),
+            "New text"
+        );
         assert_eq!(revised("<revised>cut off"), "cut off");
         assert_eq!(revised("  no tags  "), "no tags");
     }
@@ -240,26 +288,44 @@ mod tests {
 
     #[test]
     fn picks_openai_first_then_anthropic_with_their_defaults() {
-        let both = config(&[("ANTHROPIC_API_KEY", "a"), ("OPENAI_API_KEY", "o")]).unwrap().unwrap();
+        let both = config(&[("ANTHROPIC_API_KEY", "a"), ("OPENAI_API_KEY", "o")])
+            .unwrap()
+            .unwrap();
         assert_eq!(
             both,
-            RewriteConfig { provider: Provider::OpenAi, api_key: "o".into(), base_url: OPENAI_BASE_URL.into(), model: OPENAI_MODEL.into() }
+            RewriteConfig {
+                provider: Provider::OpenAi,
+                api_key: "o".into(),
+                base_url: OPENAI_BASE_URL.into(),
+                model: OPENAI_MODEL.into()
+            }
         );
         let anthropic = config(&[("ANTHROPIC_API_KEY", "a")]).unwrap().unwrap();
         assert_eq!(
-            (anthropic.provider, anthropic.model.as_str(), anthropic.base_url.as_str()),
+            (
+                anthropic.provider,
+                anthropic.model.as_str(),
+                anthropic.base_url.as_str()
+            ),
             (Provider::Anthropic, ANTHROPIC_MODEL, ANTHROPIC_BASE_URL)
         );
     }
 
     #[test]
     fn openai_rewrites_default_to_gpt_6_luna() {
-        assert_eq!(config(&[("OPENAI_API_KEY", "o")]).unwrap().unwrap().model, "gpt-6-luna");
+        assert_eq!(
+            config(&[("OPENAI_API_KEY", "o")]).unwrap().unwrap().model,
+            "gpt-6-luna"
+        );
     }
 
     #[test]
     fn the_provider_can_select_anthropic_when_both_keys_are_set() {
-        let set = config(&[("ANTHROPIC_API_KEY", "a"), ("OPENAI_API_KEY", "o"), ("EMDITOR_REWRITE_PROVIDER", "anthropic")]);
+        let set = config(&[
+            ("ANTHROPIC_API_KEY", "a"),
+            ("OPENAI_API_KEY", "o"),
+            ("EMDITOR_REWRITE_PROVIDER", "anthropic"),
+        ]);
         assert_eq!(set.unwrap().unwrap().provider, Provider::Anthropic);
     }
 
@@ -274,13 +340,29 @@ mod tests {
         ]);
         assert_eq!(
             set.unwrap().unwrap(),
-            RewriteConfig { provider: Provider::OpenAi, api_key: "o".into(), base_url: "http://proxy/v1".into(), model: "gpt-6-astra".into() }
+            RewriteConfig {
+                provider: Provider::OpenAi,
+                api_key: "o".into(),
+                base_url: "http://proxy/v1".into(),
+                model: "gpt-6-astra".into()
+            }
         );
     }
 
     #[test]
     fn a_bad_provider_or_a_missing_key_is_an_error() {
-        assert!(config(&[("EMDITOR_REWRITE_PROVIDER", "gemini")]).unwrap_err().contains("unknown"));
-        assert!(config(&[("EMDITOR_REWRITE_PROVIDER", "openai"), ("ANTHROPIC_API_KEY", "a")]).unwrap_err().contains("OPENAI_API_KEY"));
+        assert!(
+            config(&[("EMDITOR_REWRITE_PROVIDER", "gemini")])
+                .unwrap_err()
+                .contains("unknown")
+        );
+        assert!(
+            config(&[
+                ("EMDITOR_REWRITE_PROVIDER", "openai"),
+                ("ANTHROPIC_API_KEY", "a")
+            ])
+            .unwrap_err()
+            .contains("OPENAI_API_KEY")
+        );
     }
 }

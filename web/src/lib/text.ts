@@ -35,16 +35,36 @@ export function normalizeNewPath(input: string): string {
   return MD_EXT.test(cleaned) ? cleaned : `${cleaned}.md`
 }
 
+/** Encodes one path segment: escapes that are present already stay, all other characters are encoded. */
+function encodeSegment(segment: string): string {
+  return segment.split(/(%[0-9A-Fa-f]{2})/g)
+    .map((piece) => (/^%[0-9A-Fa-f]{2}$/.test(piece) ? piece : encodeURIComponent(piece)))
+    .join('')
+}
+
 /** Turns an image or link target in a document into a URL that the server can serve. */
 export function resolveAsset(docPath: string, src: string): string {
   if (!src || /^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)) return src
-  const parts = src.startsWith('/') ? [] : dirOf(docPath).split('/').filter(Boolean)
-  for (const part of src.split('/')) {
+  let reference = src
+  let query = ''
+  let fragment = ''
+  const hashAt = reference.indexOf('#')
+  if (hashAt >= 0) {
+    fragment = reference.slice(hashAt)
+    reference = reference.slice(0, hashAt)
+  }
+  const queryAt = reference.indexOf('?')
+  if (queryAt >= 0) {
+    query = reference.slice(queryAt)
+    reference = reference.slice(0, queryAt)
+  }
+  const parts = reference.startsWith('/') ? [] : dirOf(docPath).split('/').filter(Boolean).map(encodeURIComponent)
+  for (const part of reference.split('/')) {
     if (!part || part === '.') continue
     if (part === '..') parts.pop()
-    else parts.push(part)
+    else parts.push(encodeSegment(part))
   }
-  return '/files/' + parts.map(encodeURIComponent).join('/')
+  return '/files/' + parts.join('/') + query + fragment
 }
 
 /** A short relative time such as "5 min ago" or "3 days ago". */

@@ -1,6 +1,7 @@
 // ABOUTME: Reveals every document in a desk stack before opening or separating them.
 
 import type { DeskItem } from '../lib/desk'
+import { MAX_PANES } from '../lib/layouts'
 import { dirOf, titleFromPath } from '../lib/text'
 import { Dialog } from './Dialog'
 
@@ -25,9 +26,9 @@ export function StackDetails({ item, onOpen, onOpenMany, onUnstack, onClose }: P
     </div>
     <div className="dialog-actions">
       <button className="text-btn" onClick={onUnstack}>Unstack</button>
-      <button className="btn" onClick={() => onOpenMany(item.stack.paths)}>{item.files.length > 6 ? 'Open first six' : 'Open all'}</button>
+      <button className="btn" onClick={() => onOpenMany(item.stack.paths)}>{item.files.length > MAX_PANES ? `Open first ${MAX_PANES}` : 'Open all'}</button>
     </div>
-    {item.files.length > 6 && <p className="field-hint">The other documents remain in this stack.</p>}
+    {item.files.length > MAX_PANES && <p className="field-hint">The other documents remain in this stack.</p>}
   </>}
   </Dialog>
 }

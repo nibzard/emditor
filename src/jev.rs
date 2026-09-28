@@ -42,7 +42,11 @@ impl JevConfig {
 
     /// Reads `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, and `EMDITOR_JEV_MODEL` through `var`. Gives None without a key.
     pub fn from_vars(var: impl Fn(&str) -> Option<String>) -> Option<Self> {
-        let get = |name: &str| var(name).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        let get = |name: &str| {
+            var(name)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
         Some(Self {
             api_key: get("TYPESAFE_API_KEY")?,
             base_url: get("TYPESAFE_BASE_URL")
@@ -97,7 +101,10 @@ pub struct CheckRequest {
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum TargetResult {
     /// The probability of a yes answer for each rule of the target's scope, by rule id.
-    Ok { id: String, probabilities: Map<String, Value> },
+    Ok {
+        id: String,
+        probabilities: Map<String, Value>,
+    },
     /// Jev could not check the target now. The editor asks again later.
     Unavailable { id: String },
 }
@@ -108,7 +115,8 @@ impl CheckRequest {
         self.targets.len() <= MAX_TARGETS
             && self.rules.len() <= MAX_RULES
             && self.targets.iter().all(|t| {
-                t.text.chars().count() <= MAX_TEXT_CHARS && t.context.chars().count() <= MAX_CONTEXT_CHARS
+                t.text.chars().count() <= MAX_TEXT_CHARS
+                    && t.context.chars().count() <= MAX_CONTEXT_CHARS
             })
     }
 }
@@ -157,8 +165,22 @@ impl Jev {
 
     /// The cache key of one answer: everything that can change it. The full text is the key, so keys cannot collide.
     fn key(&self, target: &Target, rule: &Rule) -> String {
-        let rule = json!([rule.name, rule.question, rule.flag_when, rule.allow_when, rule.boundary_cases, rule.examples]);
-        json!([self.config.model, target.scope, target.text, target.context, rule]).to_string()
+        let rule = json!([
+            rule.name,
+            rule.question,
+            rule.flag_when,
+            rule.allow_when,
+            rule.boundary_cases,
+            rule.examples
+        ]);
+        json!([
+            self.config.model,
+            target.scope,
+            target.text,
+            target.context,
+            rule
+        ])
+        .to_string()
     }
 
     /// Checks all targets at the same time, each against the rules of its scope.
@@ -205,18 +227,29 @@ impl Jev {
                 }
             }
         }
-        TargetResult::Ok { id: target.id, probabilities }
+        TargetResult::Ok {
+            id: target.id,
+            probabilities,
+        }
     }
 
     /// Sends one System One request with a yes/no question for each rule. Gives the probabilities in rule order.
     async fn ask(&self, target: &Target, rules: &[&Rule]) -> Result<Vec<f64>, String> {
-        let questions: Map<String, Value> = rules.iter().enumerate().map(|(i, rule)| (format!("r{i}"), question(rule))).collect();
+        let questions: Map<String, Value> = rules
+            .iter()
+            .enumerate()
+            .map(|(i, rule)| (format!("r{i}"), question(rule)))
+            .collect();
         let body = json!({
             "model": self.config.model,
             "state": { "target": target.text, "context": target.context },
             "questions": questions,
         });
-        let _permit = self.permits.acquire().await.map_err(|err| err.to_string())?;
+        let _permit = self
+            .permits
+            .acquire()
+            .await
+            .map_err(|err| err.to_string())?;
         let res = self
             .http
             .post(format!("{}/v1/systemone", self.config.base_url))
@@ -227,7 +260,10 @@ impl Jev {
             .await
             .map_err(|err| format!("request failed: {err}"))?;
         let status = res.status();
-        let reply: Value = res.json().await.map_err(|err| format!("bad reply: {err}"))?;
+        let reply: Value = res
+            .json()
+            .await
+            .map_err(|err| format!("bad reply: {err}"))?;
         if !status.is_success() {
             let message = reply["detail"]["message"]
                 .as_str()
@@ -276,10 +312,16 @@ mod tests {
     #[test]
     fn config_needs_a_key_and_pins_the_model() {
         assert_eq!(JevConfig::from_vars(|_| None), None);
-        let config = JevConfig::from_vars(|name| (name == "TYPESAFE_API_KEY").then(|| "k".to_string())).unwrap();
+        let config =
+            JevConfig::from_vars(|name| (name == "TYPESAFE_API_KEY").then(|| "k".to_string()))
+                .unwrap();
         assert_eq!(
             config,
-            JevConfig { api_key: "k".into(), base_url: DEFAULT_BASE_URL.into(), model: "jev-1.13.0".into() }
+            JevConfig {
+                api_key: "k".into(),
+                base_url: DEFAULT_BASE_URL.into(),
+                model: "jev-1.13.0".into()
+            }
         );
     }
 
