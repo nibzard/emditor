@@ -6,7 +6,7 @@ import { type CSSProperties, lazy, Suspense, useCallback, useEffect, useMemo, us
 import { api } from '../api'
 import { type SaveStatus, useDocument, useNotes, useRewriteModel, useRules } from '../hooks/useDocument'
 import type { NotesLoadError } from '../hooks/notesStore'
-import { contextAround, kindOf, locate, type Note, quoteAt, type TextQuote, wordsAfterCuts } from '../lib/annotations'
+import { contextAround, kindOf, locate, type Note, quoteAt, type TextQuote } from '../lib/annotations'
 import { type Finding, keep } from '../lib/lint'
 import type { ScrollSync } from '../lib/scrollSync'
 import { dirOf, titleFromPath } from '../lib/text'
@@ -67,6 +67,8 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
   const [hover, setHover] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [anchors, setAnchors] = useState<{ attached: string[]; detached: string[] }>({ attached: [], detached: [] })
+  // The word count that the cuts in the text would leave; null when no cut has text.
+  const [cutWords, setCutWords] = useState<number | null>(null)
   const richRef = useRef<RichHandle | null>(null)
   const [selected, setSelected] = useState(false)
   const rules = useRules()
@@ -100,6 +102,7 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
     setActive(null)
     setEditing(null)
     setAnchors({ attached: [], detached: [] })
+    setCutWords(null)
     setLintCard(null)
     setRewriteError(null)
   }, [pane.path])
@@ -114,6 +117,7 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
         ? prev
         : { attached: report.attached, detached: report.detached },
     )
+    setCutWords(report.cutWords)
     if (report.quotes.size === 0) return
     const queue = quoteQueue.current
     for (const [id, quote] of report.quotes) queue.quotes.set(id, quote)
@@ -282,7 +286,7 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
         <span className="pane-tools chrome">
           {doc && (
             <span className="pane-stats">
-              {words.toLocaleString()} words{cuts.length > 0 && ` · ${wordsAfterCuts(words, cuts).toLocaleString()} after cuts`} · {pages} {pages === 1 ? 'page' : 'pages'}
+              {words.toLocaleString()} words{cutWords !== null && ` · ${cutWords.toLocaleString()} after cuts`} · {pages} {pages === 1 ? 'page' : 'pages'}
             </span>
           )}
           {pane.path && (

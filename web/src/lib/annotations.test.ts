@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  anchorNotes, colorOf, contextAround, cutRange, diffWords, kindOf, locate, mergeNotes, type Note, parseNotes, quoteAt, refreshQuotes, serializeNotes,
+  anchorNotes, colorOf, contextAround, cutRange, diffWords, kindOf, locate, locateWithin, mergeNotes, type Note, parseNotes, quoteAt, refreshQuotes, serializeNotes,
   stackMargin, trimSpan, wordsAfterCuts,
 } from './annotations'
 
@@ -62,6 +62,26 @@ describe('locate', () => {
 
   it('returns null for an empty quote', () => {
     expect(locate(TEXT, { exact: '', prefix: '', suffix: '' })).toBeNull()
+  })
+})
+
+describe('locateWithin', () => {
+  it('finds the passage inside the part, with the context deciding between equals', () => {
+    const second = TEXT.indexOf('cat', TEXT.indexOf('cat') + 1)
+    const quote = quoteAt(TEXT, second, second + 3)
+    expect(locateWithin(TEXT, 0, TEXT.length, quote)).toEqual({ from: second, to: second + 3 })
+  })
+
+  it('holds the part bounds and gives null when the passage is outside it', () => {
+    const first = TEXT.indexOf('cat')
+    const second = TEXT.indexOf('cat', first + 1)
+    const quote = quoteAt(TEXT, first, first + 3)
+    expect(locateWithin(TEXT, 0, first + 3, quote)).toEqual({ from: first, to: first + 3 })
+    expect(locateWithin(TEXT, first + 3, second, quote)).toBeNull()
+  })
+
+  it('returns null for an empty quote', () => {
+    expect(locateWithin(TEXT, 0, TEXT.length, { exact: '', prefix: '', suffix: '' })).toBeNull()
   })
 })
 
@@ -254,13 +274,31 @@ describe('note kinds', () => {
 })
 
 describe('wordsAfterCuts', () => {
+  const text = 'one two three four'
+
   it('takes away the words of each cut', () => {
-    const cuts = [note('c', TEXT, 0, 11, { kind: 'cut' }), note('d', TEXT, 24, 31, { kind: 'cut' })]
-    expect(wordsAfterCuts(100, cuts)).toBe(95)
+    expect(wordsAfterCuts('The cat sat on the mat.', [{ from: 0, to: 11 }])).toBe(3)
   })
 
-  it('does not go below zero', () => {
-    expect(wordsAfterCuts(1, [note('c', TEXT, 0, 11, { kind: 'cut' })])).toBe(0)
+  it('counts the words of two overlapping cuts only once', () => {
+    // Cutting "one two" and "two three" removes "one two three", so "four" stays.
+    expect(wordsAfterCuts(text, [{ from: 0, to: 7 }, { from: 4, to: 13 }])).toBe(1)
+  })
+
+  it('applies cuts that touch nothing of each other', () => {
+    expect(wordsAfterCuts(text, [{ from: 8, to: 13 }, { from: 0, to: 3 }])).toBe(2)
+  })
+
+  it('counts a cut inside another cut only once', () => {
+    expect(wordsAfterCuts(text, [{ from: 0, to: 13 }, { from: 4, to: 7 }])).toBe(1)
+  })
+
+  it('treats cuts that touch as one range', () => {
+    expect(wordsAfterCuts(text, [{ from: 0, to: 7 }, { from: 8, to: 18 }, { from: 7, to: 8 }])).toBe(0)
+  })
+
+  it('gives zero when nothing is left', () => {
+    expect(wordsAfterCuts(text, [{ from: 0, to: text.length }])).toBe(0)
   })
 })
 
