@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { type CSSProperties, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { type SaveStatus, useDocument, useNotes, useRewriteModel, useRules } from '../hooks/useDocument'
+import type { NotesLoadError } from '../hooks/notesStore'
 import { contextAround, kindOf, locate, type Note, quoteAt, type TextQuote, wordsAfterCuts } from '../lib/annotations'
 import { type Finding, keep } from '../lib/lint'
 import type { ScrollSync } from '../lib/scrollSync'
@@ -53,6 +54,12 @@ const STATUS_LABEL: Partial<Record<SaveStatus, string>> = {
   conflict: 'Changed on disk',
 }
 
+const NOTES_LOAD_MESSAGE: Record<NotesLoadError, string> = {
+  'read-failed': 'The notes of this document could not be read.',
+  malformed: 'The notes file of this document is damaged, so its notes stay hidden until it is repaired.',
+  'unsupported-version': 'The notes file of this document was written by another version of emditor.',
+}
+
 export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus, onMode, onClose, onPick, onSplit, showNotes, onShowNotes }: Props) {
   const { doc, status, words, edit, reload, keepMine, retry } = useDocument(pane.path)
   const notes = useNotes(pane.path)
@@ -81,6 +88,13 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
   const resolvedNotes = notes.notes.filter((n) => n.resolved)
   // Notes and cuts ask for a decision; highlights do not, so they are not in the count.
   const openCount = notes.notes.filter((n) => !n.resolved && kindOf(n) !== 'highlight').length
+  // The notes problem shows here, whatever mode the pane is in and whether the notes are on show, because the
+  // shelf that holds it needs the notes to be loaded and visible.
+  const notesProblem = notes.loadError
+    ? { text: NOTES_LOAD_MESSAGE[notes.loadError], action: 'Read the notes again' }
+    : notes.status === 'error' && !notesOn
+      ? { text: 'The notes could not be saved.', action: 'Retry save' }
+      : null
 
   useEffect(() => {
     setActive(null)
@@ -316,6 +330,20 @@ export function Pane({ pane, focused, topRow, focusSignal, sync, style, onFocus,
               <button onClick={() => { if (window.confirm('Discard your draft and load the disk version?')) void reload() }}>Load disk version</button>
               <button onClick={() => void keepMine()}>Keep my draft</button>
             </> : <button onClick={() => void retry()}>Retry save</button>}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence initial={false}>
+        {pane.path && notesProblem && (
+          <motion.div
+            className="pane-alert"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+          >
+            <span>{notesProblem.text}</span>
+            <button onClick={() => void notes.retry()}>{notesProblem.action}</button>
           </motion.div>
         )}
       </AnimatePresence>

@@ -140,13 +140,48 @@ export function refreshQuotes(text: string, attached: AttachedNote[]): Map<strin
   return updates
 }
 
+/** Why a notes file that exists could not be read: its content is broken, or another version of emditor wrote it. */
+export type NotesFileError = 'malformed' | 'unsupported-version'
+export type LoadedNotes = { notes: Note[]; error: null } | { notes: null; error: NotesFileError }
+
+/** Whether two states of one note hold the same data. */
+function sameNote(a: Note, b: Note): boolean {
+  return (
+    a.id === b.id &&
+    a.body === b.body &&
+    a.created === b.created &&
+    a.resolved === b.resolved &&
+    a.kind === b.kind &&
+    a.color === b.color &&
+    a.replacement === b.replacement &&
+    sameQuote(a.quote, b.quote)
+  )
+}
+
 /**
- * Joins the notes on disk with the notes here, after another program changed the notes file.
- * Notes from both sides stay, the version here wins for a note on both sides, and notes deleted here stay deleted.
+ * Joins three states of one notes file: the state that both sides started from (`base`), the state on disk
+ * now, and the state here. A note changed here wins over any state on disk. A note untouched here takes the
+ * disk state, so a change or a removal on disk survives. A note removed here stays removed, also when disk
+ * changed it, because the removal was the last choice made here. Notes added on either side stay, and the
+ * notes that stay keep the order they have here.
  */
-export function mergeNotes(disk: Note[], local: Note[], deleted: Set<string>): Note[] {
+export function mergeNotes(base: Note[], disk: Note[], local: Note[]): Note[] {
+  const baseById = new Map(base.map((n) => [n.id, n]))
+  const diskById = new Map(disk.map((n) => [n.id, n]))
+  const out: Note[] = []
+  for (const note of local) {
+    const ancestor = baseById.get(note.id)
+    // A note that was added or changed here stays as it is here.
+    if (!ancestor || !sameNote(ancestor, note)) out.push(note)
+    // A note untouched here takes the disk state, which also removes it when disk removed it.
+    else if (diskById.has(note.id)) out.push(diskById.get(note.id)!)
+  }
   const localIds = new Set(local.map((n) => n.id))
-  return [...local, ...disk.filter((n) => !localIds.has(n.id) && !deleted.has(n.id))]
+  for (const note of disk) {
+    // A note of the base state that is not here was removed here, so it stays removed. The rest was added on disk.
+    if (!localIds.has(note.id) && !baseById.has(note.id)) out.push(note)
+  }
+  return out
 }
 
 function isQuote(value: unknown): value is TextQuote {
@@ -173,18 +208,25 @@ function isNote(value: unknown): value is Note {
   )
 }
 
-/** Reads a notes file. Empty or broken input gives no notes, and entries with a bad shape are dropped. */
-export function parseNotes(raw: string): Note[] {
-  if (!raw.trim()) return []
+/**
+ * Reads the content of a notes file that exists. Whitespace-only or broken content is an error instead of an
+ * empty list, so a damaged file is never treated as a file without notes and then overwritten. Entries with a
+ * bad shape are dropped. A document without a notes file has empty content and modified 0; the caller tells
+ * that case apart before it calls this.
+ */
+export function parseNotes(raw: string): LoadedNotes {
+  if (!raw.trim()) return { notes: null, error: 'malformed' }
   let data: unknown
   try {
     data = JSON.parse(raw)
   } catch {
-    return []
+    return { notes: null, error: 'malformed' }
   }
-  const notes = (data as { notes?: unknown })?.notes
-  if (!Array.isArray(notes)) return []
-  return notes.filter(isNote).map(({ id, quote, body, created, resolved, kind, color, replacement }) => {
+  if (typeof data !== 'object' || data === null) return { notes: null, error: 'malformed' }
+  const file = data as { version?: unknown; notes?: unknown }
+  if (file.version !== 1) return { notes: null, error: 'unsupported-version' }
+  if (!Array.isArray(file.notes)) return { notes: null, error: 'malformed' }
+  const notes = file.notes.filter(isNote).map(({ id, quote, body, created, resolved, kind, color, replacement }) => {
     const note: Note = { id, quote: { exact: quote.exact, prefix: quote.prefix, suffix: quote.suffix }, body, created, resolved }
     // An unknown kind or color, for example from a newer version, reads as a plain note.
     if (kind !== 'comment' && KINDS.includes(kind as NoteKind)) note.kind = kind
@@ -196,6 +238,7 @@ export function parseNotes(raw: string): Note[] {
     }
     return note
   })
+  return { notes, error: null }
 }
 
 /** Writes a notes file. The output is stable and readable, so it gives clean diffs in git. */

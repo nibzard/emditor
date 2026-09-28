@@ -1,29 +1,34 @@
 // ABOUTME: Keeps the notes of each open document and saves them to the sidecar notes file.
-// ABOUTME: After a conflict it merges with the notes on disk and tries again, so no note is lost.
+// ABOUTME: It merges against the loaded state after a conflict, and a notes file it cannot read stays as it is.
 
 import { api, ApiError } from '../api'
-import { mergeNotes, type Note, parseNotes, serializeNotes, type TextQuote } from '../lib/annotations'
+import { mergeNotes, type Note, type NotesFileError, parseNotes, serializeNotes, type TextQuote } from '../lib/annotations'
 
 export type NotesStatus = 'idle' | 'saving' | 'saved' | 'error'
-export type NotesSnapshot = { notes: Note[]; loaded: boolean; status: NotesStatus }
+/** Why the notes of a document could not be read: the read failed, or the file cannot be read as notes. */
+export type NotesLoadError = NotesFileError | 'read-failed'
+export type NotesSnapshot = { notes: Note[]; loaded: boolean; status: NotesStatus; loadError: NotesLoadError | null }
 
 type Entry = {
   path: string
   snapshot: NotesSnapshot
   notes: Note[]
+  /** The notes as they were on disk when they were last read or written. This is the base of every merge. */
+  base: Note[]
   baseModified: number
-  /** Notes deleted here that the notes file on disk can still have. */
-  deleted: Set<string>
   revision: number
   acknowledged: number
   loaded: boolean
+  loadError: NotesLoadError | null
+  /** Reads of this document that are in flight, so the same file is not read twice at once. */
+  reading: number
   pending: number
   timer?: ReturnType<typeof setTimeout>
   chain: Promise<void>
   listeners: Set<() => void>
 }
 
-const EMPTY: NotesSnapshot = { notes: [], loaded: false, status: 'idle' }
+const EMPTY: NotesSnapshot = { notes: [], loaded: false, status: 'idle', loadError: null }
 const SAVE_DELAY_MS = 500
 /** A write that meets a conflict merges and tries again, at most this many times. */
 const MAX_ATTEMPTS = 3
@@ -34,7 +39,7 @@ export class NotesStore {
   constructor(private readonly client: Pick<typeof api, 'readNotes' | 'writeNotes'> = api) {}
 
   private publish(entry: Entry, status: NotesStatus = entry.snapshot.status) {
-    entry.snapshot = { notes: entry.notes, loaded: entry.loaded, status }
+    entry.snapshot = { notes: entry.notes, loaded: entry.loaded, status, loadError: entry.loadError }
     for (const listener of entry.listeners) listener()
   }
 
@@ -45,11 +50,13 @@ export class NotesStore {
       path,
       snapshot: EMPTY,
       notes: [],
+      base: [],
       baseModified: 0,
-      deleted: new Set(),
       revision: 0,
       acknowledged: 0,
       loaded: false,
+      loadError: null,
+      reading: 0,
       pending: 0,
       chain: Promise.resolve(),
       listeners: new Set(),
@@ -60,17 +67,30 @@ export class NotesStore {
   }
 
   private async load(entry: Entry) {
+    entry.reading += 1
     try {
       const disk = await this.client.readNotes(entry.path)
-      const notes = parseNotes(disk.content)
-      entry.notes = entry.revision > 0 ? mergeNotes(notes, entry.notes, entry.deleted) : notes
+      // The server tells a document without a notes file apart with empty content and modified 0.
+      // Any other content that does not parse keeps the file as it is, because a write could destroy it.
+      const parsed = disk.content === '' && disk.modified === 0 ? { notes: [] as Note[], error: null } : parseNotes(disk.content)
+      if (parsed.error) {
+        entry.loadError = parsed.error
+        this.publish(entry, 'error')
+        return
+      }
+      entry.notes = entry.revision > 0 ? mergeNotes(entry.base, parsed.notes, entry.notes) : parsed.notes
+      entry.base = parsed.notes
       entry.baseModified = disk.modified
       entry.loaded = true
+      entry.loadError = null
       this.publish(entry)
-      if (entry.revision > entry.acknowledged) void this.save(entry.path)
+      if (entry.revision > entry.acknowledged) await this.save(entry.path)
     } catch (err) {
       console.error(`emditor: cannot load the notes of ${entry.path}`, err)
+      entry.loadError = 'read-failed'
       this.publish(entry, 'error')
+    } finally {
+      entry.reading -= 1
     }
   }
 
@@ -107,7 +127,6 @@ export class NotesStore {
   }
 
   remove(path: string, id: string) {
-    this.entry(path).deleted.add(id)
     this.change(path, (notes) => notes.filter((n) => n.id !== id))
   }
 
@@ -116,7 +135,9 @@ export class NotesStore {
     if (!entry) return Promise.resolve()
     if (entry.timer) clearTimeout(entry.timer)
     entry.timer = undefined
-    if (entry.revision <= entry.acknowledged) return entry.chain
+    // Nothing is written before the notes file is read, or while it cannot be read, because the write
+    // could hide or destroy the notes that are in it. A later read saves what is waiting.
+    if (entry.revision <= entry.acknowledged || !entry.loaded || entry.loadError) return entry.chain
     entry.pending += 1
     this.publish(entry, 'saving')
     entry.chain = entry.chain
@@ -127,17 +148,23 @@ export class NotesStore {
     return entry.chain
   }
 
+  /** Reads the notes file again, for example after it could not be read, and saves what is waiting. */
+  retry(path: string): Promise<void> {
+    const entry = this.entries.get(path)
+    if (!entry) return Promise.resolve()
+    if (entry.loaded && !entry.loadError) return this.save(path)
+    return this.load(entry)
+  }
+
   private async write(entry: Entry) {
-    // Nothing is written before the notes file is loaded, because the write could hide notes on disk.
-    if (!entry.loaded || entry.revision <= entry.acknowledged) return
+    if (entry.revision <= entry.acknowledged) return
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const revision = entry.revision
-      const deleted = new Set(entry.deleted)
       try {
         const saved = await this.client.writeNotes(entry.path, serializeNotes(entry.notes), entry.baseModified)
         entry.baseModified = saved.modified
+        entry.base = entry.notes
         entry.acknowledged = Math.max(entry.acknowledged, revision)
-        for (const id of deleted) entry.deleted.delete(id)
         this.publish(entry, entry.revision > entry.acknowledged ? 'saving' : 'saved')
         if (entry.revision > entry.acknowledged) void this.save(entry.path)
         return
@@ -145,7 +172,14 @@ export class NotesStore {
         if (err instanceof ApiError && err.code === 'conflict' && attempt < MAX_ATTEMPTS) {
           try {
             const disk = await this.client.readNotes(entry.path)
-            entry.notes = mergeNotes(parseNotes(disk.content), entry.notes, entry.deleted)
+            const parsed = parseNotes(disk.content)
+            if (parsed.error) {
+              entry.loadError = parsed.error
+              this.publish(entry, 'error')
+              return
+            }
+            entry.notes = mergeNotes(entry.base, parsed.notes, entry.notes)
+            entry.base = parsed.notes
             entry.baseModified = disk.modified
             this.publish(entry)
             continue
@@ -164,17 +198,29 @@ export class NotesStore {
 
   hasUnsettled = () => [...this.entries.values()].some((e) => e.revision > e.acknowledged || e.pending > 0)
 
-  /** Takes notes that another program changed, for each document that has nothing waiting to save. */
+  /** Takes notes that another program changed, and gives a failed first read another chance. */
   async refresh() {
     await Promise.all([...this.entries.values()].map(async (entry) => {
-      if (!entry.loaded || entry.revision > entry.acknowledged || entry.pending > 0) return
+      if (entry.reading > 0 || entry.revision > entry.acknowledged || entry.pending > 0) return
+      if (!entry.loaded || entry.loadError) {
+        await this.load(entry)
+        return
+      }
       const revision = entry.revision
       try {
         const disk = await this.client.readNotes(entry.path)
         if (entry.revision !== revision || entry.pending > 0 || disk.modified === entry.baseModified) return
-        entry.notes = parseNotes(disk.content)
+        const parsed = parseNotes(disk.content)
+        if (parsed.error) {
+          // The notes that are here stay as they are, and nothing is written over the damaged file.
+          entry.loadError = parsed.error
+          this.publish(entry, 'error')
+          return
+        }
+        entry.notes = mergeNotes(entry.base, parsed.notes, entry.notes)
+        entry.base = parsed.notes
         entry.baseModified = disk.modified
-        entry.deleted.clear()
+        entry.loadError = null
         this.publish(entry)
       } catch {
         // A later focus will try again.
