@@ -2374,8 +2374,11 @@ select:focus-visible {
   transition: background-color 0.2s var(--ease);
 }
 
-.md-body .mark-rewrite.is-active {
-  background: var(--accent-soft);
+/* Screen only, so that print keeps the rewrite mark free of background. */
+@media screen {
+  .md-body .mark-rewrite.is-active {
+    background: var(--accent-soft);
+  }
 }
 
 .note-card.note-rewrite {
