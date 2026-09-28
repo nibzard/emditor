@@ -86,7 +86,7 @@ describe('anchorNotes', () => {
 describe('parseNotes and serializeNotes', () => {
   it('round-trips notes', () => {
     const notes = [note('a', TEXT, 4, 7), note('b', TEXT, 8, 11, { resolved: true })]
-    expect(parseNotes(serializeNotes(notes))).toEqual(notes)
+    expect(parseNotes(serializeNotes(notes))).toEqual({ notes, error: null })
   })
 
   it('writes a versioned file that ends with a newline', () => {
@@ -95,16 +95,26 @@ describe('parseNotes and serializeNotes', () => {
     expect(out.endsWith('\n')).toBe(true)
   })
 
-  it('returns no notes for empty or broken input', () => {
-    expect(parseNotes('')).toEqual([])
-    expect(parseNotes('{not json')).toEqual([])
-    expect(parseNotes('{"version":1,"notes":"x"}')).toEqual([])
+  it('reports an error for empty or broken input, so a damaged file is never read as empty', () => {
+    expect(parseNotes('')).toEqual({ notes: null, error: 'malformed' })
+    expect(parseNotes('\n  ')).toEqual({ notes: null, error: 'malformed' })
+    expect(parseNotes('{not json')).toEqual({ notes: null, error: 'malformed' })
+    expect(parseNotes('null')).toEqual({ notes: null, error: 'malformed' })
+    expect(parseNotes('123')).toEqual({ notes: null, error: 'malformed' })
+    expect(parseNotes('[]')).toEqual({ notes: null, error: 'malformed' })
+    expect(parseNotes('{"version":1,"notes":"x"}')).toEqual({ notes: null, error: 'malformed' })
+  })
+
+  it('reports an error for a file that another version wrote', () => {
+    const newer = serializeNotes([note('a', TEXT, 4, 7)]).replace('"version": 1', '"version": 2')
+    expect(parseNotes(newer)).toEqual({ notes: null, error: 'unsupported-version' })
+    expect(parseNotes('{"notes":[]}')).toEqual({ notes: null, error: 'unsupported-version' })
   })
 
   it('drops entries that do not have the correct shape', () => {
     const good = note('a', TEXT, 4, 7)
     const raw = JSON.stringify({ version: 1, notes: [good, { id: 'bad' }, null, { ...good, id: 7 }] })
-    expect(parseNotes(raw)).toEqual([good])
+    expect(parseNotes(raw)).toEqual({ notes: [good], error: null })
   })
 })
 
@@ -165,17 +175,47 @@ describe('refreshQuotes', () => {
 describe('mergeNotes', () => {
   const a = note('a', TEXT, 4, 7)
   const b = note('b', TEXT, 8, 11)
-  const c = note('c', TEXT, 12, 14)
+  const base = [a, b]
 
-  it('keeps notes from both sides, and the local version of a note wins', () => {
-    const localA = { ...a, body: 'mine' }
-    const merged = mergeNotes([a, b], [localA, c], new Set())
-    expect(merged.map((n) => n.id)).toEqual(['a', 'c', 'b'])
-    expect(merged[0].body).toBe('mine')
+  it('takes a change from disk for a note that was not touched here', () => {
+    const merged = mergeNotes(base, [{ ...a, body: 'theirs' }, b], base)
+    expect(merged.find((n) => n.id === 'a')?.body).toBe('theirs')
   })
 
-  it('leaves out notes that were deleted here', () => {
-    expect(mergeNotes([a, b], [a], new Set(['b'])).map((n) => n.id)).toEqual(['a'])
+  it('takes a removal from disk for a note that was not touched here', () => {
+    expect(mergeNotes(base, [b], base).map((n) => n.id)).toEqual(['b'])
+  })
+
+  it('lets a change here win over a change on disk', () => {
+    const merged = mergeNotes(base, [a, { ...b, body: 'theirs' }], [a, { ...b, body: 'mine' }])
+    expect(merged.find((n) => n.id === 'b')?.body).toBe('mine')
+  })
+
+  it('lets a change here win over a removal on disk', () => {
+    const merged = mergeNotes(base, [b], [{ ...a, body: 'mine' }, b])
+    expect(merged.map((n) => n.id)).toEqual(['a', 'b'])
+    expect(merged.find((n) => n.id === 'a')?.body).toBe('mine')
+  })
+
+  it('keeps a removal here for a note that disk still has as it was', () => {
+    expect(mergeNotes(base, base, [a]).map((n) => n.id)).toEqual(['a'])
+  })
+
+  it('keeps a removal here for a note that disk changed, because the removal was the last choice here', () => {
+    expect(mergeNotes(base, [a, { ...b, body: 'theirs' }], [a]).map((n) => n.id)).toEqual(['a'])
+  })
+
+  it('keeps a note away that both sides removed', () => {
+    expect(mergeNotes(base, [a], [a]).map((n) => n.id)).toEqual(['a'])
+  })
+
+  it('keeps notes that each side added', () => {
+    const merged = mergeNotes(base, [...base, note('c', TEXT, 12, 14)], [...base, note('d', TEXT, 12, 14)])
+    expect(merged.map((n) => n.id)).toEqual(['a', 'b', 'd', 'c'])
+  })
+
+  it('keeps the order of the notes that stay here', () => {
+    expect(mergeNotes(base, [b, a], [b, a]).map((n) => n.id)).toEqual(['b', 'a'])
   })
 })
 
@@ -188,24 +228,24 @@ describe('note kinds', () => {
 
   it('round-trips highlights and cuts', () => {
     const notes = [note('h', TEXT, 4, 7, { kind: 'highlight', color: 'pink' }), note('c', TEXT, 8, 11, { kind: 'cut' })]
-    expect(parseNotes(serializeNotes(notes))).toEqual(notes)
+    expect(parseNotes(serializeNotes(notes)).notes).toEqual(notes)
   })
 
   it('round-trips rewrites with their replacement', () => {
     const notes = [note('r', TEXT, 4, 7, { kind: 'rewrite', body: '', replacement: 'dog' })]
-    expect(parseNotes(serializeNotes(notes))).toEqual(notes)
+    expect(parseNotes(serializeNotes(notes)).notes).toEqual(notes)
   })
 
   it('reads a rewrite without a replacement as a plain note', () => {
     const odd = { ...note('r', TEXT, 4, 7), kind: 'rewrite' }
-    const [read] = parseNotes(JSON.stringify({ version: 1, notes: [odd] }))
-    expect(read).toEqual(note('r', TEXT, 4, 7))
+    const { notes } = parseNotes(JSON.stringify({ version: 1, notes: [odd] }))
+    expect(notes).toEqual([note('r', TEXT, 4, 7)])
   })
 
   it('keeps notes with an unknown kind or color as plain notes', () => {
     const odd = { ...note('a', TEXT, 4, 7), kind: 'sticker', color: 'plaid' }
-    const [read] = parseNotes(JSON.stringify({ version: 1, notes: [odd] }))
-    expect(read).toEqual(note('a', TEXT, 4, 7))
+    const { notes } = parseNotes(JSON.stringify({ version: 1, notes: [odd] }))
+    expect(notes).toEqual([note('a', TEXT, 4, 7)])
   })
 
   it('does not write a kind or color into a plain note', () => {
