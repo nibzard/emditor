@@ -77,7 +77,6 @@ export function useDocument(path: string | null) {
   return {
     ...snapshot,
     edit: (markdown: string) => { if (path) store.edit(path, markdown) },
-    save: () => path ? store.save(path) : Promise.resolve(),
     reload: () => path ? store.reload(path) : Promise.resolve(),
     keepMine: () => path ? store.retry(path, true) : Promise.resolve(),
     retry: () => path ? store.retry(path) : Promise.resolve(),

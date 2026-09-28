@@ -1,5 +1,5 @@
 // ABOUTME: A segmented control with a pill that slides to the chosen option.
-// ABOUTME: Used for edit mode, desk sorting, and the desk or workspace switch.
+// ABOUTME: Its only use is the desk sort control.
 
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
@@ -11,14 +11,13 @@ type Props<T extends string> = {
   value: T
   options: Option<T>[]
   onChange: (value: T) => void
-  small?: boolean
 }
 
-export const pillSpring = { type: 'spring', stiffness: 520, damping: 40, mass: 0.8 } as const
+const pillSpring = { type: 'spring', stiffness: 520, damping: 40, mass: 0.8 } as const
 
-export function Segmented<T extends string>({ id, value, options, onChange, small }: Props<T>) {
+export function Segmented<T extends string>({ id, value, options, onChange }: Props<T>) {
   return (
-    <div className={small ? 'seg seg-sm' : 'seg'} role="tablist">
+    <div className="seg" role="tablist">
       {options.map((option) => {
         const active = option.value === value
         return (

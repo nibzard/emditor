@@ -7,21 +7,22 @@ import { resolveAsset } from './text'
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 
-let currentDoc = ''
-
-const marked = new Marked({ gfm: true, async: false })
-marked.use({
-  renderer: {
-    html({ text }) {
-      return escapeHtml(text)
+/** A parser whose image renderer resolves links against this document. */
+function parserFor(docPath: string) {
+  const marked = new Marked({ gfm: true, async: false })
+  marked.use({
+    renderer: {
+      html({ text }) {
+        return escapeHtml(text)
+      },
+      image({ href, text }) {
+        return `<img src="${escapeHtml(resolveAsset(docPath, href))}" alt="${escapeHtml(text)}" loading="lazy">`
+      },
     },
-    image({ href, text }) {
-      return `<img src="${escapeHtml(resolveAsset(currentDoc, href))}" alt="${escapeHtml(text)}" loading="lazy">`
-    },
-  },
-})
+  })
+  return marked
+}
 
 export function renderPreview(markdown: string, docPath: string): string {
-  currentDoc = docPath
-  return marked.parse(markdown) as string
+  return parserFor(docPath).parse(markdown) as string
 }
