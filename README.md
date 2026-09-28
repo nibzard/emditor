@@ -1,8 +1,6 @@
 # emditor
 
-A small local Markdown desk for macOS. One Rust binary starts a local server and opens the app in your browser.
-
-![emditor: two panes with margin notes and the keys table](docs/screenshot.png)
+A small Markdown desk for macOS. One Rust binary starts a local server and opens the app in your browser.
 
 - **Documents**: a visible, searchable list for moving between files. The most recently edited document opens when you start.
 - **Workspace**: write in rich text or Markdown source mode. Open another document beside the current one when you need to compare them, and choose an arrangement from **Arrange**.
@@ -39,26 +37,26 @@ The server listens on 127.0.0.1 only and refuses requests from other hosts, orig
 
 ## Keys
 
-| Keys | Action |
-| --- | --- |
-| ⌘K | Find a document |
-| ⌥N | New document |
-| ⌥T | Theme: system, light, dark |
-| ⌥0 | Desk or workspace |
-| ⌥1 – ⌥7 | Layout: one, two, three, 2×2, one + two, rows, 3×2 |
+| Keys        | Action                                                    |
+| ----------- | --------------------------------------------------------- |
+| ⌘K          | Find a document                                           |
+| ⌥N          | New document                                              |
+| ⌥T          | Theme: system, light, dark                                |
+| ⌥0          | Desk or workspace                                         |
+| ⌥1 – ⌥7     | Layout: one, two, three, 2×2, one + two, rows, 3×2        |
 | ⌃H ⌃J ⌃K ⌃L | Focus pane left, down, up, right (add ⇧ to move the pane) |
-| ⌥L | Scroll together |
-| ⌥F | Focus mode |
-| ⌘= ⌘− ⌘0 | Zoom the paper in, out, actual size |
-| ⌘/ | Rich text or Markdown source |
-| ⌥⌘M | Add a note to the selected text |
-| ⌥⌘1 – ⌥⌘4 | Highlight: yellow, green, blue, pink |
-| ⌥⌘⌫ | Suggest cutting the selected text |
-| ⌥M | Show or hide notes |
-| ⌘P | Print the focused pane on A4 |
-| ⌥W | Close pane |
-| ⌘S | Save all now |
-| ⌥/ or ? | All shortcuts |
+| ⌥L          | Scroll together                                           |
+| ⌥F          | Focus mode                                                |
+| ⌘= ⌘− ⌘0    | Zoom the paper in, out, actual size                       |
+| ⌘/          | Rich text or Markdown source                              |
+| ⌥⌘M         | Add a note to the selected text                           |
+| ⌥⌘1 – ⌥⌘4   | Highlight: yellow, green, blue, pink                      |
+| ⌥⌘⌫         | Suggest cutting the selected text                         |
+| ⌥M          | Show or hide notes                                        |
+| ⌘P          | Print the focused pane on A4                              |
+| ⌥W          | Close pane                                                |
+| ⌘S          | Save all now                                              |
+| ⌥/ or ?     | All shortcuts                                             |
 
 On the desk: arrows move, ↵ opens (⇧↵ in a new pane), space or ⌘-click selects, G stacks, U unstacks, ⌥+arrows reorder, S changes the sort, + and − change the thumbnail size, N makes a new document.
 
@@ -71,4 +69,4 @@ npm run dev -- ~/notes           # or edit another folder
 make test
 ```
 
-Open http://127.0.0.1:5173/. Press Ctrl+C to stop both servers.
+Open <http://127.0.0.1:5173/>. Press Ctrl+C to stop both servers.
