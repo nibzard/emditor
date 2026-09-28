@@ -29,7 +29,7 @@ OPENAI_API_KEY=sk-... EMDITOR_REWRITE_MODEL=gpt-6-astra emditor
 ANTHROPIC_API_KEY=sk-ant-... emditor                      # rewrites with Claude
 ```
 
-With `OPENAI_API_KEY`, rewrites use `gpt-6-sol` through the Responses API (`gpt-6-astra` and `gpt-6-luna` also work). Otherwise, with `ANTHROPIC_API_KEY`, they use `claude-opus-5-5` through the Messages API. When both keys are set, `EMDITOR_REWRITE_PROVIDER=anthropic` selects Claude. `EMDITOR_REWRITE_MODEL` sets the model. Only the passage, some text around it, and the rules that it breaks go to the API, and only when you ask for a rewrite. OpenAI requests are sent with `store: false`.
+With `OPENAI_API_KEY`, rewrites use `gpt-6-luna` through the Responses API (`gpt-6-sol` and `gpt-6-astra` also work). Otherwise, with `ANTHROPIC_API_KEY`, they use `claude-opus-5-5` through the Messages API. When both keys are set, `EMDITOR_REWRITE_PROVIDER=anthropic` selects Claude. `EMDITOR_REWRITE_MODEL` sets the model. Only the passage, some text around it, and the rules that it breaks go to the API, and only when you ask for a rewrite. OpenAI requests are sent with `store: false`.
 
 The server listens on 127.0.0.1 only and refuses requests from other hosts, origins, and cross-site pages.
 

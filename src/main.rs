@@ -24,7 +24,7 @@ ENVIRONMENT:
     OPENAI_API_KEY            Turns on rewrites with OpenAI (Responses API)
     ANTHROPIC_API_KEY         Turns on rewrites with Claude (Anthropic Messages API)
     EMDITOR_REWRITE_PROVIDER  openai or anthropic (default: openai when it has a key)
-    EMDITOR_REWRITE_MODEL     The model (default: gpt-6-sol or claude-opus-5-5)
+    EMDITOR_REWRITE_MODEL     The model (default: gpt-6-luna or claude-opus-5-5)
     ANTHROPIC_BASE_URL        Default: https://api.anthropic.com
     OPENAI_BASE_URL           Default: https://api.openai.com/v1
     Without a key, rewrites are off.

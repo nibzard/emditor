@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 const ANTHROPIC_MODEL: &str = "claude-opus-5-5";
 const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
-const OPENAI_MODEL: &str = "gpt-6-sol";
+const OPENAI_MODEL: &str = "gpt-6-luna";
 /// As with the official OpenAI SDKs, this base URL includes `/v1`.
 const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 const MAX_TOKENS: u32 = 4000;
@@ -248,6 +248,11 @@ mod tests {
             (anthropic.provider, anthropic.model.as_str(), anthropic.base_url.as_str()),
             (Provider::Anthropic, ANTHROPIC_MODEL, ANTHROPIC_BASE_URL)
         );
+    }
+
+    #[test]
+    fn openai_rewrites_default_to_gpt_6_luna() {
+        assert_eq!(config(&[("OPENAI_API_KEY", "o")]).unwrap().unwrap().model, "gpt-6-luna");
     }
 
     #[test]
