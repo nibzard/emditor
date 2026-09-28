@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
 
 use axum::extract::{Path as UrlPath, Query, Request, State};
-use axum::http::{StatusCode, Uri, header};
+use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -377,14 +377,45 @@ fn is_json_object(content: &str) -> bool {
 }
 
 /// Serves files such as images that Markdown documents refer to with relative paths.
+/// Each response stops MIME sniffing. A type that a browser can open as a document
+/// also gets a sandbox policy: the file then opens on its own opaque origin,
+/// where its script cannot run and it cannot reach the application origin.
 async fn raw_file(
     State(state): State<AppState>,
     UrlPath(path): UrlPath<String>,
 ) -> Result<Response, ApiError> {
     let full = resolve(&state.root, &path)?;
     let data = tokio::fs::read(&full).await?;
-    let mime = mime_guess::from_path(&full).first_or_octet_stream();
-    Ok(([(header::CONTENT_TYPE, mime.to_string())], data).into_response())
+    let mime = mime_guess::from_path(&full)
+        .first_or_octet_stream()
+        .to_string();
+    let mut response = (
+        [
+            (header::CONTENT_TYPE, mime.clone()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
+        ],
+        data,
+    )
+        .into_response();
+    if can_run_as_document(&mime) {
+        response.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("sandbox"),
+        );
+    }
+    Ok(response)
+}
+
+/// Says whether a browser can open a file of this content type as a document
+/// that carries script: HTML, XHTML, SVG, and the XML types. Images that a
+/// document embeds and plain text such as Markdown stay inline without a policy.
+fn can_run_as_document(mime: &str) -> bool {
+    mime == "text/html"
+        || mime == "application/xhtml+xml"
+        || mime == "image/svg+xml"
+        || mime == "text/xml"
+        || mime == "application/xml"
+        || mime.ends_with("+xml")
 }
 
 async fn static_asset(uri: Uri) -> Response {
