@@ -3,7 +3,7 @@
 
 import { useState } from 'react'
 import { useRules } from '../hooks/useDocument'
-import { type LintRules, RULE_NAMES } from '../lib/lint'
+import { type LintRules, RULE_NAMES, type RuleKey } from '../lib/lint'
 import { Dialog } from './Dialog'
 
 type Props = { onClose: () => void }
@@ -84,7 +84,8 @@ export function RulesDialog({ onClose }: Props) {
             <ul>
               {rules.kept.map((k) => (
                 <li key={JSON.stringify(k)}>
-                  <span><strong>{k.match}</strong> · {RULE_NAMES[k.rule]}<br /><em>{k.sentence}</em></span>
+                  <span>{k.rule.startsWith('semantic:') ? <em>{k.match}</em> : <><strong>{k.match}</strong> · {RULE_NAMES[k.rule as RuleKey]}<br /><em>{k.sentence}</em></>}
+                    {k.rule.startsWith('semantic:') && <> · {rules.semantic.find((r) => `semantic:${r.id}` === k.rule)?.name ?? 'Deleted rule'}</>}</span>
                   <button type="button" className="text-btn"
                     onClick={() => set((r) => ({ ...r, kept: r.kept.filter((x) => JSON.stringify(x) !== JSON.stringify(k)) }))}>Undo</button>
                 </li>

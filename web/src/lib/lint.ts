@@ -1,11 +1,16 @@
 // ABOUTME: Pure logic for the writing lint: exact checks (phrases to avoid, repeated words, long sentences) on plain text.
 // ABOUTME: It also splits Markdown source into blocks, keeps occurrences that the writer accepts, and reads and writes the rules file.
 
+import { parseSemantic, SEMANTIC_PRESETS, type SemanticRule } from './semantic'
+
 export type RuleKey = 'phrases' | 'repeatedWord' | 'sentenceLength'
 
-/** An occurrence that the writer keeps: this rule does not mark this match in this sentence again. */
+/**
+ * An occurrence that the writer keeps: this rule does not mark this match in this sentence again.
+ * For a semantic rule, `rule` is `semantic:<id>`, and `match` and `sentence` are the text of the target.
+ */
 export interface Kept {
-  rule: RuleKey
+  rule: RuleKey | `semantic:${string}`
   match: string
   sentence: string
 }
@@ -14,6 +19,8 @@ export interface LintRules {
   phrases: { enabled: boolean; list: string[]; caseSensitive: boolean }
   repeatedWord: { enabled: boolean }
   sentenceLength: { enabled: boolean; maxWords: number }
+  /** Rules that Jev checks. */
+  semantic: SemanticRule[]
   kept: Kept[]
 }
 
@@ -54,6 +61,7 @@ export const DEFAULT_RULES: LintRules = {
   },
   repeatedWord: { enabled: true },
   sentenceLength: { enabled: false, maxWords: 40 },
+  semantic: SEMANTIC_PRESETS,
   kept: [],
 }
 
@@ -243,7 +251,8 @@ const RULE_KEYS: RuleKey[] = ['phrases', 'repeatedWord', 'sentenceLength']
 
 const isKept = (value: unknown): value is Kept => {
   const k = value as Kept
-  return typeof k === 'object' && k !== null && RULE_KEYS.includes(k.rule) && typeof k.match === 'string' && typeof k.sentence === 'string'
+  const rule = typeof k?.rule === 'string' && (RULE_KEYS.includes(k.rule as RuleKey) || /^semantic:.+/.test(k.rule))
+  return typeof k === 'object' && k !== null && rule && typeof k.match === 'string' && typeof k.sentence === 'string'
 }
 
 const bool = (value: unknown, fallback: boolean) => (typeof value === 'boolean' ? value : fallback)
@@ -276,6 +285,7 @@ export function parseRules(raw: string): LintRules {
       enabled: bool(length.enabled, d.sentenceLength.enabled),
       maxWords: typeof maxWords === 'number' && Number.isInteger(maxWords) && maxWords > 0 ? maxWords : d.sentenceLength.maxWords,
     },
+    semantic: parseSemantic(data.semantic),
     kept: Array.isArray(data.kept)
       ? data.kept.filter(isKept).map(({ rule, match, sentence }) => ({ rule, match, sentence }))
       : [],
