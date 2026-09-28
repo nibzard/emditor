@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { FileEntry } from '../api'
 import { buildDesk, docKey, type DeskState, EMPTY_DESK, moveBy, moveItem, stackItems, unstack } from './desk'
 
-const file = (path: string, modified: number): FileEntry => ({ path, modified, size: 1, preview: '' })
+const file = (path: string, modified: number): FileEntry => ({ path, modified, preview: '' })
 const files = [file('b.md', 30), file('a.md', 10), file('notes/c.md', 20), file('d10.md', 5), file('d9.md', 4)]
 const keys = (state: DeskState) => buildDesk(files, state).map((i) => i.key)
 

@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from 'react'
 import { resolveTheme, type ThemeChoice } from '../lib/theme'
+import { parseThemeChoice } from '../lib/stored'
 import { useStoredState } from './useStoredState'
 
 export const THEME_KEY = 'emditor.theme'
@@ -10,7 +11,7 @@ export const THEME_KEY = 'emditor.theme'
 const darkQuery = () => window.matchMedia('(prefers-color-scheme: dark)')
 
 export function useTheme() {
-  const [choice, setChoice] = useStoredState<ThemeChoice>(THEME_KEY, 'system')
+  const [choice, setChoice] = useStoredState<ThemeChoice>(THEME_KEY, 'system', parseThemeChoice)
   const [systemDark, setSystemDark] = useState(() => darkQuery().matches)
   useEffect(() => {
     const query = darkQuery()

@@ -1,7 +1,7 @@
 // ABOUTME: Client for the emditor server API.
 // ABOUTME: It lists, reads, writes, and creates Markdown files and their notes, keeps the writing rules, and asks for rewrites.
 
-export type FileEntry = { path: string; modified: number; size: number; preview: string }
+export type FileEntry = { path: string; modified: number; preview: string }
 export type Listing = { root: string; path: string; files: FileEntry[] }
 export type Doc = { path: string; content: string; modified: number }
 /** The notes file of a document. A document without notes has empty content and modified 0. */
