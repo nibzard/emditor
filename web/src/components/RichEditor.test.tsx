@@ -6,7 +6,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api'
-import { DocumentStore } from '../hooks/documentStore'
+import { DocumentStore, tabDraftKey } from '../hooks/documentStore'
 import { RichEditor, type RichHandle } from './RichEditor'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -45,14 +45,16 @@ function setup() {
     getItem: (key: string) => memory.get(key) ?? null,
     setItem: (key: string, value: string) => { memory.set(key, value) },
     removeItem: (key: string) => { memory.delete(key) },
+    key: (index: number) => [...memory.keys()][index] ?? null,
+    get length() { return memory.size },
   }
-  const store = new DocumentStore(FOLDER, folder.client, storage)
+  const store = new DocumentStore(FOLDER, folder.client, storage, 'rich-editor-test')
   const open = async (path: string) => {
     store.open(path)
     await vi.waitFor(() => expect(store.getSnapshot(path).doc?.content).toBe(folder.content(path)))
   }
   const backup = (path: string) => {
-    const stored = JSON.parse(memory.get(`emditor.drafts:${FOLDER}`) ?? '{}') as Record<string, { content: string }>
+    const stored = JSON.parse(memory.get(tabDraftKey(FOLDER, 'rich-editor-test')) ?? '{}') as Record<string, { content: string }>
     return stored[path]?.content
   }
   return { folder, store, open, backup }
